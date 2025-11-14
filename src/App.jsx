@@ -16,7 +16,7 @@ import AuthScreen from '@/components/AuthScreen';
 import { PremiumUyelik } from '@/components/PremiumUyelik'; 
 
 
-function App() {
+export function App() {
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = React.useState('dashboard');
@@ -239,5 +239,3 @@ function App() {
     </>
   );
 }
-
-export default App;
