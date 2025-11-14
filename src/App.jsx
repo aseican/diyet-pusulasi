@@ -12,7 +12,7 @@ import Progress from '@/components/Progress';
 import Profile from '@/components/Profile';
 import Onboarding from '@/components/Onboarding';
 import AuthScreen from '@/components/AuthScreen';
-import PremiumUyelik from '@/components/PremiumUyelik'; // YENİ COMPONENT IMPORTU
+import { PremiumUyelik } from '@/components/PremiumUyelik'; // YENİ COMPONENT IMPORTU
 
 
 function App() {
