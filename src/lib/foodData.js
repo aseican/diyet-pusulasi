@@ -1,0 +1,1 @@
+// This file is deprecated. Food data is now fetched from the Supabase database.

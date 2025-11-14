@@ -1,0 +1,1 @@
+// This file is no longer needed and its functionality is merged into MealTracker.jsx
