@@ -3,12 +3,12 @@ import { Helmet } from 'react-helmet';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
-import { calculateCalorieTarget } from '@/lib/calculator'; 
+import { calculateCalorieTarget } from '@/lib/calculator'; // KALORİ HESAPLAYICI
 
 import Header from '@/components/Header';
 import BottomNav from '@/components/BottomNav';
 import { Dashboard } from '@/components/Dashboard'; 
-import { MealTracker } from '@/components/MealTracker'; // <-- SON VE KESİN DÜZELTME BURADA
+import { MealTracker } from '@/components/MealTracker'; 
 import { Progress } from '@/components/Progress'; 
 import Profile from '@/components/Profile';
 import Onboarding from '@/components/Onboarding';
@@ -24,6 +24,7 @@ export function App() {
   const [meals, setMeals] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
 
+  // === FETCH USER DATA (Tek Satır Sorgu) ===
   const fetchUserData = React.useCallback(async () => {
     if (!user) return;
 
@@ -44,6 +45,7 @@ export function App() {
       setUserData(data);
     }
   }, [user, toast]);
+  // ===========================================
 
   const fetchMeals = React.useCallback(async () => {
     if (!user) return;
@@ -80,12 +82,18 @@ export function App() {
     fetchData();
   }, [user, fetchUserData, fetchMeals]);
 
+  // === MANTIK FIX 1: PROFIL GUNCELLEME (KALORI VE SU EKLEME HATASINI ÇÖZER) ===
   const updateUserData = React.useCallback(
     async (newData) => {
       if (!user) return;
 
+      // 1. Yeni verileri mevcut verilerle birleştir
       const combinedData = { ...userData, ...newData };
+
+      // 2. Yeni hedef kaloriyi hesapla
       const newTargetCalories = calculateCalorieTarget(combinedData);
+      
+      // 3. Payload'a yeni kalori hedefini ekle
       const payload = { ...newData, target_calories: newTargetCalories }; 
 
       const { data, error } = await supabase
@@ -110,12 +118,15 @@ export function App() {
     [user, toast, userData]
   );
 
+  // === MANTIK FIX 2: ONBOARDING TAMAMLAMA (BAŞLANGIÇ KİLOSU VE KALORİ HESAPLAMA) ===
   const handleOnboardingComplete = async (formData) => {
     if (!user) return;
     
+    // 1. Hesaplamalar
     const target_calories = calculateCalorieTarget(formData);
-    const start_weight = formData.weight; 
+    const start_weight = formData.weight; // Başlangıç kilosu, ilk kilonuzdur
 
+    // 2. Payload oluşturma
     const payload = { ...formData, id: user.id, target_calories, start_weight };
 
     const { data, error } = await supabase
