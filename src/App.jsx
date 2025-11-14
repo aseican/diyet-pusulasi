@@ -3,6 +3,7 @@ import { Helmet } from 'react-helmet';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
+import { calculateCalorieTarget } from '@/lib/calculator'; // <-- YENİ KALORİ HESAPLAYICI IMPORTU
 
 import Header from '@/components/Header';
 import BottomNav from '@/components/BottomNav';
@@ -12,46 +13,39 @@ import Progress from '@/components/Progress';
 import Profile from '@/components/Profile';
 import Onboarding from '@/components/Onboarding';
 import AuthScreen from '@/components/AuthScreen';
-import { PremiumUyelik } from '@/components/PremiumUyelik'; // DOĞRU IMPORT KULLANILDI
+import { PremiumUyelik } from '@/components/PremiumUyelik'; 
 
 
 function App() {
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
-  // HATA OLAN SATIRLAR BURASIYDI (21-24 ARASI)
   const [activeTab, setActiveTab] = React.useState('dashboard');
   const [userData, setUserData] = React.useState(null); 
   const [meals, setMeals] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
 
-  // === SON VE TAM SORGUNUZ ===
+  // === SON VE KESİN SORGUNUZ (TEK SATIRDA) ===
   const fetchUserData = React.useCallback(async () => {
     if (!user) return;
 
     const { data, error } = await supabase
       .from('profiles')
-      .select(`
-        id, username, target_calories, created_at, gender,
-        age, height, weight, target_weight, goal_type,
-        activity_level, start_weight, water_intake,
-        daily_water_goal, last_reset_date,
-        plan_tier, ai_usage_count, premium_expires_at // Tüm sütunlar çekiliyor
-      `)
+      .select('id,username,target_calories,created_at,gender,age,height,weight,target_weight,goal_type,activity_level,start_weight,water_intake,daily_water_goal,last_reset_date,plan_tier,ai_usage_count,premium_expires_at')
       .eq('id', user.id)
       .maybeSingle();
 
     if (error) {
       console.error('Profil yükleme hatası:', error);
-      // Hata alınırsa uyarı gösterilir (bu kısım artık RLS'ten değil, session'dan kaynaklanıyor)
       toast({
         variant: 'destructive',
         title: 'Profil Hatası',
-        description: 'Profiliniz yüklenirken bir hata oluştu.',
+        description: 'Profiliniz yüklenirken bir hata oluştu.', // Artık RLS değil, data hatasıdır
       });
     } else {
       setUserData(data);
     }
   }, [user, toast]);
+  // ===========================================
 
   const fetchMeals = React.useCallback(async () => {
     if (!user) return;
@@ -88,12 +82,23 @@ function App() {
     fetchData();
   }, [user, fetchUserData, fetchMeals]);
 
+  // === MANTIK FIX 1: PROFIL GUNCELLEME (KALORI HESAPLAMA) ===
   const updateUserData = React.useCallback(
     async (newData) => {
       if (!user) return;
+
+      // 1. Yeni verileri mevcut verilerle birleştir (userData dependency'si eklendi)
+      const combinedData = { ...userData, ...newData };
+
+      // 2. Yeni hedef kaloriyi hesapla
+      const newTargetCalories = calculateCalorieTarget(combinedData);
+      
+      // 3. Payload'u hazırla
+      const payload = { ...newData, target_calories: newTargetCalories }; 
+
       const { data, error } = await supabase
         .from('profiles')
-        .update(newData)
+        .update(payload)
         .eq('id', user.id)
         .select()
         .single();
@@ -110,14 +115,23 @@ function App() {
         toast({ title: 'Başarılı!', description: 'Bilgileriniz güncellendi.' });
       }
     },
-    [user, toast]
+    [user, toast, userData] // userData'yı dependency array'e ekledik
   );
 
+  // === MANTIK FIX 2: ONBOARDING TAMAMLAMA (BAŞLANGIÇ KİLOSU VE KALORİ HESAPLAMA) ===
   const handleOnboardingComplete = async (formData) => {
     if (!user) return;
+    
+    // 1. Kalori Hedefi ve Başlangıç Kilosu Hesaplama/Ayarlama
+    const target_calories = calculateCalorieTarget(formData);
+    const start_weight = formData.weight; // Başlangıç kilosu, ilk kilonuzdur
+
+    // 2. Verileri insert işlemine ekle
+    const payload = { ...formData, id: user.id, target_calories, start_weight };
+
     const { data, error } = await supabase
       .from('profiles')
-      .insert([{ ...formData, id: user.id }])
+      .insert([payload])
       .select()
       .single();
 
@@ -136,7 +150,8 @@ function App() {
       });
     }
   };
-
+  
+  // ... [Geri kalan kodlarınız aynı kalır] ...
   const addMeal = async (mealData) => {
     if (!user) return;
     const mealWithUser = { ...mealData, user_id: user.id };
