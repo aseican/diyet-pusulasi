@@ -12,15 +12,10 @@ import Progress from '@/components/Progress';
 import Profile from '@/components/Profile';
 import Onboarding from '@/components/Onboarding';
 import AuthScreen from '@/components/AuthScreen';
-
-
+import PremiumUyelik from '@/components/PremiumUyelik'; // YENİ COMPONENT IMPORTU
 
 
 function App() {
- 
-
-
-  // ----- BURADAN AŞAĞISI SİZİN MEVCUT KODUNUZ -----
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = React.useState('dashboard');
@@ -37,7 +32,8 @@ function App() {
         id, username, target_calories, created_at, gender,
         age, height, weight, target_weight, goal_type,
         activity_level, start_weight, water_intake,
-        daily_water_goal, last_reset_date
+        daily_water_goal, last_reset_date,
+        plan_tier, ai_usage_count, premium_expires_at // Yeni premium sütunları
       `)
       .eq('id', user.id)
       .maybeSingle();
@@ -83,7 +79,7 @@ function App() {
       } else {
         setUserData(null);
         setMeals([]);
-        setLoading(false); // Ensure loading is false when no user
+        setLoading(false); 
       }
     };
     fetchData();
@@ -217,6 +213,8 @@ function App() {
         return <Progress userData={userData} />;
       case 'profile':
         return <Profile userData={userData} updateUserData={updateUserData} />;
+      case 'premium': 
+        return <PremiumUyelik />; 
       default:
         return <Dashboard userData={userData} meals={meals} updateUserData={updateUserData} deleteMeal={deleteMeal} />;
     }
