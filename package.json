@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "vite --host :: --port 3000",
-    "build": "vite build",
+    "build": "npm run clean && vite build",
+    "clean": "rm -rf dist",
     "preview": "vite preview --host :: --port 3000"
   },
   "dependencies": {
