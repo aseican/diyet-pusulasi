@@ -3,27 +3,25 @@ import { BarChart } from 'lucide-react';
 import React from 'react';
 
 // Kilo takibi verisi için varsayılan bir veri yapısı
-// İleride buraya gerçek kilo kayıtlarınızın verisi gelecektir
 const mockWeightData = [
   { name: 'Başlangıç', weight: 0 },
   { name: 'Hafta 1', weight: 0 },
   { name: 'Şimdi', weight: 0 },
 ];
 
-// --- Hata Çözümü: Veri Dönüştürme ---
-// Bu kısım ileride gerçek bir Chart kütüphanesi ile değiştirilmelidir.
+// --- Veriyi Sayısal Güvenli Hale Getiren Grafik ---
 const ProgressChart = ({ startWeight, currentWeight }) => {
-    // Sayısal olmayan veya 0 olan veriyi varsayılan değere çek
+    // Sayısal olmayan veya 0 olan veriyi varsayılan değere çek (Hata Çözümü)
     const startW = Number(startWeight) || 0;
     const currentW = Number(currentWeight) || 0;
     
     // Geçici olarak mock data'yı başlangıç ve mevcut kiloyla güncelleyelim
     const data = [
-      { name: 'Başlangıç', weight: startW, color: 'hsl(120, 60%, 50%)' }, // Yeşil tonu
-      { name: 'Şimdi', weight: currentW, color: 'hsl(210, 60%, 50%)' }, // Mavi tonu
+      { name: 'Başlangıç', weight: startW, color: 'hsl(120, 60%, 50%)' }, 
+      { name: 'Şimdi', weight: currentW, color: 'hsl(210, 60%, 50%)' }, 
     ];
 
-    const maxWeight = Math.max(startW, currentW, 100); // Grafik yüksekliği için bir üst sınır
+    const maxWeight = Math.max(startW, currentW, 100); 
     const minWeight = Math.min(startW, currentW, 0);
     const range = maxWeight - minWeight;
 
@@ -36,7 +34,7 @@ const ProgressChart = ({ startWeight, currentWeight }) => {
                         <div 
                             className="w-10 rounded-t-lg transition-all duration-500"
                             style={{
-                                height: `${range > 0 ? ((item.weight - minWeight) / range) * 80 + 20 : 50}%`, // Oransal yükseklik
+                                height: `${range > 0 ? ((item.weight - minWeight) / range) * 80 + 20 : 50}%`, 
                                 backgroundColor: item.color,
                             }}
                         ></div>
@@ -54,7 +52,7 @@ const ProgressChart = ({ startWeight, currentWeight }) => {
 
 export const Progress = ({ userData }) => {
   
-  // HATA ÇÖZÜMÜ: Veriyi Number'a çevir
+  // HATA ÇÖZÜMÜ: Veriyi Number'a çevir (0.0 kg sorununu çözer)
   const startWeight = Number(userData?.start_weight || 0); 
   const currentWeight = Number(userData?.weight || 0); 
   
