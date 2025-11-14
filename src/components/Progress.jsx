@@ -1,155 +1,114 @@
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { BarChart } from 'lucide-react';
 import React from 'react';
-import { motion } from 'framer-motion';
-import { TrendingDown, Target, Calendar, Award } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-const Progress = ({ userData }) => {
-  if (!userData) {
-    return <div className="p-6">Yükleniyor...</div>;
-  }
+// Kilo takibi verisi için varsayılan bir veri yapısı
+// İleride buraya gerçek kilo kayıtlarınızın verisi gelecektir
+const mockWeightData = [
+  { name: 'Başlangıç', weight: 0 },
+  { name: 'Hafta 1', weight: 0 },
+  { name: 'Şimdi', weight: 0 },
+];
 
-  // 🧩 Kullanıcı verileri
-  const { weight, target_weight, start_weight, weight_history, daily_deficit, goal_type } = userData;
+// --- Hata Çözümü: Veri Dönüştürme ---
+// Bu kısım ileride gerçek bir Chart kütüphanesi ile değiştirilmelidir.
+const ProgressChart = ({ startWeight, currentWeight }) => {
+    // Sayısal olmayan veya 0 olan veriyi varsayılan değere çek
+    const startW = Number(startWeight) || 0;
+    const currentW = Number(currentWeight) || 0;
+    
+    // Geçici olarak mock data'yı başlangıç ve mevcut kiloyla güncelleyelim
+    const data = [
+      { name: 'Başlangıç', weight: startW, color: 'hsl(120, 60%, 50%)' }, // Yeşil tonu
+      { name: 'Şimdi', weight: currentW, color: 'hsl(210, 60%, 50%)' }, // Mavi tonu
+    ];
 
-  // 🧮 Kilo geçmişini sıralayıp formatla
-  const formattedWeightHistory = (weight_history || [])
-    .map(entry => ({
-      date: new Date(entry.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' }),
-      weight: entry.weight
-    }))
-    .sort((a, b) => new Date(a.date) - new Date(b.date));
+    const maxWeight = Math.max(startW, currentW, 100); // Grafik yüksekliği için bir üst sınır
+    const minWeight = Math.min(startW, currentW, 0);
+    const range = maxWeight - minWeight;
 
-  // 🎯 Başlangıç / Mevcut / Hedef kilolar
-  const initialWeight = Number(start_weight) || (formattedWeightHistory.length > 0 ? formattedWeightHistory[0].weight : 0);
-  const currentWeight = Number(weight) || initialWeight;
-  const targetWeight = Number(target_weight) || initialWeight;
+    // Basit bir bar grafik gösterimi
+    return (
+        <div className="flex flex-col items-center p-4 space-y-4">
+            <div className="w-full h-40 flex items-end justify-around">
+                {data.map((item) => (
+                    <div key={item.name} className="flex flex-col items-center h-full justify-end">
+                        <div 
+                            className="w-10 rounded-t-lg transition-all duration-500"
+                            style={{
+                                height: `${range > 0 ? ((item.weight - minWeight) / range) * 80 + 20 : 50}%`, // Oransal yükseklik
+                                backgroundColor: item.color,
+                            }}
+                        ></div>
+                        <span className="text-xs mt-1 font-medium">{item.weight.toFixed(1)} kg</span>
+                    </div>
+                ))}
+            </div>
+            <div className="flex justify-around w-full text-sm text-muted-foreground">
+                {data.map(item => <span key={item.name}>{item.name}</span>)}
+            </div>
+        </div>
+    );
+};
+// ------------------------------------------
 
-  // 💡 Kalori açığına göre tahmini kilo kaybı (isteğe bağlı)
-  // 7000 kcal = 1 kg
-  const predictedLoss = daily_deficit ? daily_deficit / 7000 : 0;
+export const Progress = ({ userData }) => {
+  
+  // HATA ÇÖZÜMÜ: Veriyi Number'a çevir
+  const startWeight = Number(userData?.start_weight || 0); 
+  const currentWeight = Number(userData?.weight || 0); 
+  
+  const weightChange = currentWeight - startWeight;
+  const targetWeight = Number(userData?.target_weight || 0); 
+  
+  const daysPassed = Math.ceil((new Date() - new Date(userData?.created_at)) / (1000 * 60 * 60 * 24));
 
-  // 📉 Gerçek veya tahmini kilo değişimi
-  const weightChange = Math.max(0, (initialWeight - currentWeight + predictedLoss).toFixed(1));
-
-  // 🎯 Hedefe kalan
-  const remaining = Math.max(0, (currentWeight - targetWeight).toFixed(1));
-
-  // 📊 Hedef ilerlemesi
-  const totalToLose = initialWeight - targetWeight;
-  let progress = 0;
-
-  if (goal_type === 'lose' && totalToLose > 0) {
-    progress = (weightChange / totalToLose) * 100;
-  } else if (goal_type === 'gain' && totalToLose < 0) {
-    const totalToGain = targetWeight - initialWeight;
-    const gained = currentWeight - initialWeight;
-    progress = (gained / totalToGain) * 100;
-  }
-
-  progress = Math.max(0, Math.min(100, progress));
-
-  // 🧾 Ekran
   return (
-    <div className="px-6 py-6 space-y-6">
-      <h2 className="text-2xl font-bold text-gray-800">İlerleme Takibi</h2>
-
-      {/* Kartlar */}
-      <div className="grid grid-cols-2 gap-4">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-5 text-white shadow-lg"
-        >
-          <TrendingDown className="w-8 h-8 mb-2 opacity-90" />
-          <p className="text-3xl font-bold">{weightChange} kg</p>
-          <p className="text-sm opacity-90 mt-1">{goal_type === 'gain' ? 'Alınan' : 'Verilen'}</p>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.1 }}
-          className="bg-gradient-to-br from-purple-500 to-indigo-600 rounded-2xl p-5 text-white shadow-lg"
-        >
-          <Target className="w-8 h-8 mb-2 opacity-90" />
-          <p className="text-3xl font-bold">{remaining > 0 ? remaining : '🎉'} kg</p>
-          <p className="text-sm opacity-90 mt-1">Hedefe Kalan</p>
-        </motion.div>
-      </div>
-
-      {/* Hedef ilerlemesi */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100"
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-            <Award className="w-5 h-5 text-emerald-600" />
-            Hedef İlerlemesi
-          </h3>
-          <span className="text-2xl font-bold text-emerald-600">{progress.toFixed(0)}%</span>
-        </div>
-        <div className="relative h-4 bg-gray-100 rounded-full overflow-hidden">
-          <motion.div
-            className="absolute top-0 left-0 h-full bg-gradient-to-r from-emerald-500 to-teal-600 rounded-full"
-            initial={{ width: 0 }}
-            animate={{ width: `${progress}%` }}
-            transition={{ duration: 1, ease: "easeOut" }}
+    <div className="p-4 space-y-6">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-lg font-medium">Kilo İlerlemesi</CardTitle>
+          <BarChart className="h-5 w-5 text-emerald-500" />
+        </CardHeader>
+        <CardContent>
+          <ProgressChart 
+            startWeight={startWeight} 
+            currentWeight={currentWeight} 
           />
-        </div>
-        <div className="flex justify-between mt-2 text-sm text-gray-500">
-          <span>Başlangıç: {initialWeight.toFixed(1)} kg</span>
-          <span>Hedef: {targetWeight.toFixed(1)} kg</span>
-        </div>
-      </motion.div>
-
-      {/* Kilo grafiği */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
-        className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100"
-      >
-        <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-          <Calendar className="w-5 h-5 text-emerald-600" />
-          Kilo Değişim Grafiği
-        </h3>
-        {formattedWeightHistory.length > 1 ? (
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={formattedWeightHistory}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="date" stroke="#9ca3af" style={{ fontSize: '12px' }} />
-              <YAxis stroke="#9ca3af" style={{ fontSize: '12px' }} domain={['dataMin - 2', 'dataMax + 2']} allowDecimals={false} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: 'white',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '8px',
-                  fontSize: '14px'
-                }}
-                formatter={(value) => [`${value} kg`, 'Kilo']}
-              />
-              <Line
-                type="monotone"
-                dataKey="weight"
-                stroke="#10b981"
-                strokeWidth={3}
-                dot={{ fill: '#10b981', r: 5 }}
-                activeDot={{ r: 7 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="text-center py-10 text-gray-500">
-            <p>Grafiği görmek için daha fazla kilo verisi eklemelisiniz.</p>
-            <p className="text-sm">Profilinizi düzenli olarak güncelleyin.</p>
+          
+          <div className="mt-4 border-t pt-4">
+            <p className="text-sm font-medium">Toplam Değişim:</p>
+            <p className={`text-2xl font-bold ${weightChange > 0 ? 'text-red-500' : weightChange < 0 ? 'text-emerald-500' : 'text-gray-600'}`}>
+              {weightChange.toFixed(1)} kg
+            </p>
           </div>
-        )}
-      </motion.div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Hedef Metrikleri</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Başlangıç Kilo:</span>
+            <span className="font-medium">{startWeight.toFixed(1)} kg</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Mevcut Kilo:</span>
+            <span className="font-medium">{currentWeight.toFixed(1)} kg</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Hedef Kilo:</span>
+            <span className="font-medium">{targetWeight.toFixed(1)} kg</span>
+          </div>
+          <div className="flex justify-between border-t pt-3">
+            <span className="text-muted-foreground">Kaydedilen Gün:</span>
+            <span className="font-medium">{daysPassed} gün</span>
+          </div>
+        </CardContent>
+      </Card>
+      
     </div>
   );
 };
-
-export default Progress;
