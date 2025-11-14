@@ -5,7 +5,7 @@ import QuickStats from '@/components/QuickStats';
 import WaterTracker from '@/components/WaterTracker';
 import TodayMeals from '@/components/TodayMeals';
 
-const Dashboard = ({ userData, meals, updateUserData, deleteMeal }) => {
+export const Dashboard = ({ userData, meals, updateUserData, deleteMeal }) => {
   const totalCalories = meals?.reduce((sum, meal) => sum + meal.calories, 0) || 0;
   const calorieGoal = userData?.target_calories || 2000;
 
