@@ -7,9 +7,9 @@ import { calculateCalorieTarget } from '@/lib/calculator'; // <-- YENİ KALORİ 
 
 import Header from '@/components/Header';
 import BottomNav from '@/components/BottomNav';
-import Dashboard from '@/components/Dashboard';
+import { Dashboard } from '@/components/Dashboard';
 import MealTracker from '@/components/MealTracker';
-import Progress from '@/components/Progress';
+import { Progress } from '@/components/Progress';
 import Profile from '@/components/Profile';
 import Onboarding from '@/components/Onboarding';
 import AuthScreen from '@/components/AuthScreen';
