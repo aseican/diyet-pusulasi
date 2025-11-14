@@ -192,14 +192,19 @@ export const MealTracker = ({ addMeal }) => {
 
       // 4) Edge Function Çağır
       const { data, error } = await supabase.functions.invoke(
-        "analyze-food-image",
-        {
-          body: { imageUrl },
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        }
-      );
+  "analyze-food-image",
+  {
+    body: { imageUrl },
+    headers: {
+     Authorization:`Bearer ${session.access_token}`,  // TEK DOĞRU HALİ
+     apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,   // DOĞRU
+     "Content-Type": "application/json",
+},
+
+  }
+);
+
+
 
       if (error) {
         console.error("EDGE ERROR:", error);
@@ -493,3 +498,4 @@ export const MealTracker = ({ addMeal }) => {
 // ======================================================================
 //                            END OF FILE
 // ======================================================================
+handleAnalyze

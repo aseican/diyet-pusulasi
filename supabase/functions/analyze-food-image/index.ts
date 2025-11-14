@@ -1,7 +1,7 @@
 // @ts-nocheck
-import { createClient } from 'npm:@supabase/supabase-js@2';
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 
 const QUOTA_LIMITS = {
   free: 3,
@@ -10,61 +10,73 @@ const QUOTA_LIMITS = {
   kapsamli: 50,
 };
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, content-type, apikey, x-client-info",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+};
+
 Deno.serve(async (req) => {
-  const supabaseClient = createClient(
-    Deno.env.get('PROJECT_URL') ?? '',
-    Deno.env.get('SERVICE_ROLE_KEY') ?? ''
+  // CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response("OK", { headers: corsHeaders });
+  }
+
+  // Supabase client
+  const supabase = createClient(
+    Deno.env.get("PROJECT_URL"),
+    Deno.env.get("SERVICE_ROLE_KEY")
   );
 
-  // Kullanıcı doğrula
-  const userToken = req.headers.get('Authorization')?.replace('Bearer ', '');
-  const { data: { user } } = await supabaseClient.auth.getUser(userToken);
+  // Auth token
+  const authHeader = req.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "");
+
+  const { data: { user } } = await supabase.auth.getUser(token);
 
   if (!user) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: corsHeaders,
+    });
   }
 
-  // Profil + kota
-  const { data: profile } = await supabaseClient
-    .from('profiles')
-    .select('plan_tier, ai_usage_count, ai_usage_last_reset')
-    .eq('id', user.id)
+  // Profile & quota
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("plan_tier, ai_usage_count, ai_usage_last_reset")
+    .eq("id", user.id)
     .maybeSingle();
 
-  const today = new Date().toISOString().split('T')[0];
-  const lastReset = profile.ai_usage_last_reset?.split('T')[0];
-  let usage = profile.ai_usage_count;
+  const today = new Date().toISOString().split("T")[0];
+  const lastReset = profile.ai_usage_last_reset?.split("T")[0];
+  let usage = lastReset === today ? profile.ai_usage_count : 0;
 
-  if (lastReset !== today) usage = 0;
-
-  const limit = QUOTA_LIMITS[profile.plan_tier];
-
-  if (usage >= limit) {
-    return new Response(JSON.stringify({ error: 'Quota exceeded' }), { status: 429 });
+  if (usage >= QUOTA_LIMITS[profile.plan_tier ?? "free"]) {
+    return new Response(JSON.stringify({ error: "Quota exceeded" }), {
+      status: 429,
+      headers: corsHeaders,
+    });
   }
 
-  // sayaç artır
-  await supabaseClient
-    .from('profiles')
+  await supabase
+    .from("profiles")
     .update({
       ai_usage_count: usage + 1,
-      ai_usage_last_reset: today
+      ai_usage_last_reset: today,
     })
-    .eq('id', user.id);
+    .eq("id", user.id);
 
-  // ----- OpenAI Request -----
-  const body = await req.json();
-  const imageUrl = body.imageUrl;
+  // Request body
+  const { imageUrl } = await req.json();
 
-  console.log("OpenAI'ye gönderilen URL:", imageUrl);
+  const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
-  const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
-
-  const response = await fetch(OPENAI_API_URL, {
+  const aiRes = await fetch(OPENAI_API_URL, {
     method: "POST",
     headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
       model: "gpt-4o-mini",
@@ -73,44 +85,18 @@ Deno.serve(async (req) => {
         {
           role: "user",
           content: [
-            {
-              type: "text",
-              text: `
-Bu bir yemek fotoğrafı. Aşağıdaki gibi JSON döndür:
-
-{
-  "name": "Yemek Adı",
-  "calories": 450,
-  "protein": 30,
-  "carbs": 5,
-  "fat": 20,
-  "quantity": 180,
-  "unit": "gram"
-}
-
-Yemek adı Türkçe olsun.
-`
-            },
-            {
-              type: "image_url",
-              image_url: { url: imageUrl, detail: "low" }
-            }
-          ]
-        }
-      ]
+            { type: "text", text: "Bu fotoğrafı analiz et ve JSON döndür." },
+            { type: "image_url", image_url: { url: imageUrl, detail: "low" } },
+          ],
+        },
+      ],
     }),
   });
 
-  const data = await response.json();
-  console.log("OpenAI cevabı:", data);
+  const result = await aiRes.json();
 
-  if (!response.ok) {
-    return new Response(JSON.stringify({ error: "OpenAI Error" }), { status: 500 });
-  }
-
-  const parsed = JSON.parse(data.choices[0].message.content);
-
-  return new Response(JSON.stringify(parsed), {
-    headers: { "Content-Type": "application/json" }
-  });
+  return new Response(
+    JSON.stringify(JSON.parse(result.choices[0].message.content)),
+    { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
 });
