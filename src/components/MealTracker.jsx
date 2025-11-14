@@ -153,58 +153,63 @@ export const MealTracker = ({ addMeal }) => { // Rollup Fix
   };
 
   const handleAnalyze = async () => {
-    if (!aiFile || !user || isAnalyzing) return;
-    setIsAnalyzing(true);
-    setAnalysisResult(null);
+  if (!aiFile || !user || isAnalyzing) return;
 
-    // KOTA KONTROLÜ
-    if (isQuotaReached) { 
-        toast({ variant: 'destructive', title: 'Limit Doldu', description: `Günlük ${quotaLimit} hakkınızı kullandınız. Lütfen planınızı yükseltin.` });
-        setIsAnalyzing(false);
-        return;
+  setIsAnalyzing(true);
+  setAnalysisResult(null);
+
+  // Kota kontrolü
+  if (isQuotaReached) {
+    toast({ variant: "destructive", title: "Limit doldu", description: `Günlük ${quotaLimit} hakkınızı doldurdunuz.` });
+    setIsAnalyzing(false);
+    return;
+  }
+
+  try {
+    // --- 1) Fotoğrafı Storage'a yükle ---
+    const fileExt = aiFile.name.split('.').pop();
+    const fileName = `${uuidv4()}.${fileExt}`;
+    const filePath = `${user.id}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(FOOD_BUCKET)
+      .upload(filePath, aiFile);
+
+    if (uploadError) {
+      console.error(uploadError);
+      toast({ variant: "destructive", title: "Yükleme Hatası", description: "Fotoğraf yüklenemedi." });
+      return;
     }
-    
-    let publicUrl = null;
-    let filePath = null;
-    
-    try {
-        // 1. ADIM: Resmi Supabase Storage'a Yükle
-        const fileExt = aiFile.name.split('.').pop();
-        const fileName = `${user.id}/${uuidv4()}.${fileExt}`;
-        filePath = `food-uploads/${fileName}`;
 
-        const { error: uploadError } = await supabase.storage
-          .from(FOOD_BUCKET)
-          .upload(filePath, aiFile);
+    // --- 2) Public URL al ---
+    const { data: publicData } = supabase.storage
+      .from(FOOD_BUCKET)
+      .getPublicUrl(filePath);
 
-        if (uploadError) throw uploadError;
+    const imageUrl = publicData.publicUrl;
+    console.log("Gönderilen imageUrl:", imageUrl);
 
-        // 2. ADIM: Yüklenen resmin URL'sini al
-        const { data: urlData } = supabase.storage.from(FOOD_BUCKET).getPublicUrl(filePath);
-        publicUrl = urlData.publicUrl;
-        
-        // 3. ADIM: Supabase Edge Function'ı (AI) çağır
-        const { data: analysisResult, error: functionError } = await supabase.functions.invoke(
-            'analyze-food-image', 
-            { body: { imageUrl: publicUrl } } 
-        );
+    // --- 3) Edge function'ı çağır ---
+    const { data, error } = await supabase.functions.invoke("analyze-food-image", {
+      body: { imageUrl },
+    });
 
-        if (functionError) throw functionError;
-        
-        // 4. ADIM: Sonucu göster (Izgara Somon simülasyonu SİLİNDİ)
-        setAnalysisResult(analysisResult); 
-        
-    } catch (error) {
-        console.error('AI Analiz Hatası:', error);
-        toast({ variant: 'destructive', title: 'Analiz Başarısız', description: error.message || 'Yemek analiz edilemedi.' });
-    } finally {
-        setIsAnalyzing(false);
-        // Dosyayı temizlemek için Storage'dan siliyoruz
-        if (filePath) {
-          await supabase.storage.from(FOOD_BUCKET).remove([filePath]); 
-        }
+    if (error) {
+      console.error("Edge Error:", error);
+      toast({ variant: "destructive", title: "AI Hatası", description: "Analiz sırasında bir hata oluştu." });
+      return;
     }
-  };
+
+    console.log("AI cevabı:", data);
+    setAnalysisResult(data);
+
+  } catch (err) {
+    console.error(err);
+    toast({ variant: "destructive", title: "Hata", description: "AI analizi başarısız." });
+  }
+
+  setIsAnalyzing(false);
+};
 
   const handleConfirmMealFromAI = () => {
     if (!analysisResult) return;
