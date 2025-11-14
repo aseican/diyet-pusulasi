@@ -18,8 +18,9 @@ import { PremiumUyelik } from '@/components/PremiumUyelik'; // DOĞRU IMPORT KUL
 function App() {
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
+  // HATA OLAN SATIRLAR BURASIYDI (21-24 ARASI)
   const [activeTab, setActiveTab] = React.useState('dashboard');
-  const [userData, setUserData] = React.useSta...
+  const [userData, setUserData] = React.useState(null); 
   const [meals, setMeals] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
 
