@@ -1,3 +1,4 @@
+import { useAuth } from '@/contexts/SupabaseAuthContext';
 import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
