@@ -133,95 +133,101 @@ export const MealTracker = ({ addMeal }) => {
     toast({ title: "Öğün Eklendi", description: `${meal.food_name} başarıyla eklendi.` });
   };
 
-  // =====================================================
-  //                     AI ANALYZE
-  // =====================================================
-  const handleFileChange = (e) => {
-    if (e.target.files?.length > 0) {
-      setAiFile(e.target.files[0]);
-      setAnalysisResult(null);
-    }
-  };
-
-  const handleAnalyze = async () => {
-    if (!aiFile || !user || isAnalyzing) return;
-
-    setIsAnalyzing(true);
+// =====================================================
+//                     AI ANALYZE
+// =====================================================
+const handleFileChange = (e) => {
+  if (e.target.files?.length > 0) {
+    setAiFile(e.target.files[0]);
     setAnalysisResult(null);
+  }
+};
 
-    if (isQuotaReached) {
+const handleAnalyze = async () => {
+  if (!aiFile || !user || isAnalyzing) return;
+
+  setIsAnalyzing(true);
+  setAnalysisResult(null);
+
+  if (isQuotaReached) {
+    toast({
+      variant: "destructive",
+      title: "Limit Doldu",
+      description: `Günlük ${quotaLimit} analiz hakkınızı kullandınız.`,
+    });
+    setIsAnalyzing(false);
+    return;
+  }
+
+  try {
+    // 1) Upload
+    const ext = aiFile.name.split(".").pop();
+    const fileName = `${uuidv4()}.${ext}`;
+    const filePath = `${user.id}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(FOOD_BUCKET)
+      .upload(filePath, aiFile);
+
+    if (uploadError) {
+      toast({ variant: "destructive", title: "Yükleme Hatası", description: "Fotoğraf yüklenemedi." });
+      setIsAnalyzing(false);
+      return;
+    }
+
+    // 2) Public URL
+    const { data: publicData } = supabase.storage.from(FOOD_BUCKET).getPublicUrl(filePath);
+    const imageUrl = publicData.publicUrl;
+
+    // 3) Token Al
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      toast({ variant: "destructive", title: "Yetki Hatası", description: "Oturum bulunamadı." });
+      setIsAnalyzing(false);
+      return;
+    }
+
+    // 4) Edge Function Çağır
+    const { data, error } = await supabase.functions.invoke(
+      "analyze-food-image",
+      {
+        body: { imageUrl },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,  // TEK DOĞRU HALİ
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,   // DOĞRU
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    if (error) {
+      console.error("EDGE ERROR:", error);
       toast({
         variant: "destructive",
-        title: "Limit Doldu",
-        description: `Günlük ${quotaLimit} analiz hakkınızı kullandınız.`,
+        title: "AI Hatası",
+        description: "Analiz sırasında bir sorun oluştu."
       });
       setIsAnalyzing(false);
       return;
     }
 
-    try {
-      // 1) Upload
-      const ext = aiFile.name.split(".").pop();
-      const fileName = `${uuidv4()}.${ext}`;
-      const filePath = `${user.id}/${fileName}`;
+    setAnalysisResult(data);
 
-      const { error: uploadError } = await supabase.storage
-        .from(FOOD_BUCKET)
-        .upload(filePath, aiFile);
-
-      if (uploadError) {
-        toast({ variant: "destructive", title: "Yükleme Hatası", description: "Fotoğraf yüklenemedi." });
-        setIsAnalyzing(false);
-        return;
-      }
-
-      // 2) Public URL
-      const { data: publicData } = supabase.storage.from(FOOD_BUCKET).getPublicUrl(filePath);
-      const imageUrl = publicData.publicUrl;
-
-      // 3) Token Al
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) {
-        toast({ variant: "destructive", title: "Yetki Hatası", description: "Oturum bulunamadı." });
-        setIsAnalyzing(false);
-        return;
-      }
-
-      // 4) Edge Function Çağır
-      const { data, error } = await supabase.functions.invoke(
-  "analyze-food-image",
-  {
-    body: { imageUrl },
-    headers: {
-     Authorization:`Bearer ${session.access_token}`,  // TEK DOĞRU HALİ
-     apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,   // DOĞRU
-     "Content-Type": "application/json",
-},
-
+  } catch (err) {
+    console.error(err);
+    toast({
+      variant: "destructive",
+      title: "Analiz Hatası",
+      description: "İşlem başarısız."
+    });
   }
-);
 
+  setIsAnalyzing(false);
+};
 
-
-      if (error) {
-        console.error("EDGE ERROR:", error);
-        toast({ variant: "destructive", title: "AI Hatası", description: "Analiz sırasında bir sorun oluştu." });
-        setIsAnalyzing(false);
-        return;
-      }
-
-      setAnalysisResult(data);
-
-    } catch (err) {
-      console.error(err);
-      toast({ variant: "destructive", title: "Analiz Hatası", description: "İşlem başarısız." });
-    }
-
-    setIsAnalyzing(false);
-  };
 
   const handleConfirmMealFromAI = () => {
     if (!analysisResult) return;
