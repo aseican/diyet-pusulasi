@@ -17,18 +17,18 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req) => {
-  // CORS preflight
+  // CORS Preflight
   if (req.method === "OPTIONS") {
-    return new Response("OK", { headers: corsHeaders });
+    return new Response("ok", { headers: corsHeaders });
   }
 
   // Supabase client
   const supabase = createClient(
     Deno.env.get("PROJECT_URL"),
-    Deno.env.get("SERVICE_ROLE_KEY")
+    Deno.env.get("SERVICE_ROLE_SECRET")
   );
 
-  // Auth token
+  // Auth
   const authHeader = req.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "");
 
@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Profile & quota
+  // Profile & Quota
   const { data: profile } = await supabase
     .from("profiles")
     .select("plan_tier, ai_usage_count, ai_usage_last_reset")
@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
 
   const today = new Date().toISOString().split("T")[0];
   const lastReset = profile.ai_usage_last_reset?.split("T")[0];
-  let usage = lastReset === today ? profile.ai_usage_count : 0;
+  const usage = lastReset === today ? profile.ai_usage_count : 0;
 
   if (usage >= QUOTA_LIMITS[profile.plan_tier ?? "free"]) {
     return new Response(JSON.stringify({ error: "Quota exceeded" }), {
@@ -67,9 +67,10 @@ Deno.serve(async (req) => {
     })
     .eq("id", user.id);
 
-  // Request body
+  // Body parse (BURADA SENDE EKSİK VARMIŞ)
   const { imageUrl } = await req.json();
 
+  // OpenAI Request
   const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
   const aiRes = await fetch(OPENAI_API_URL, {
@@ -94,9 +95,9 @@ Deno.serve(async (req) => {
   });
 
   const result = await aiRes.json();
+  const parsed = JSON.parse(result.choices[0].message.content);
 
-  return new Response(
-    JSON.stringify(JSON.parse(result.choices[0].message.content)),
-    { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-  );
+  return new Response(JSON.stringify(parsed), {
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 });
