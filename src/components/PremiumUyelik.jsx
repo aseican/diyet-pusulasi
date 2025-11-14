@@ -74,16 +74,8 @@ const handleSubscription = async (tier) => {
 
 // === ANA BİLEŞEN VE İSİMLİ DIŞA AKTARMA (NAMED EXPORT) ===
 export const PremiumUyelik = () => {
-  const { authLoading } = useAuth(); // userData'yı kaldırdık, sadece authLoading kalsın
+  const { userData } = useAuth(); // Yüklenme kontrolünü App.jsx yaptığı için burada sadece veriyi çekiyoruz
   
-  // userData'yı burada doğrudan kullanmıyoruz, App.jsx'ten gelen props'u kullanmak daha güvenli.
-  // Ancak bu bileşen App.jsx'ten prop almıyor. O yüzden yeniden çekelim (Eski çökme hatalarını tetiklememek için)
-  const { userData } = useAuth(); 
-
-  if (authLoading || !userData) { // userData yüklenene kadar bekleyelim
-    return <div className="p-8 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></div>;
-  }
-
   const currentPlan = userData?.plan_tier || 'free'; 
 
   return (
