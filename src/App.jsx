@@ -12,8 +12,7 @@ import Progress from '@/components/Progress';
 import Profile from '@/components/Profile';
 import Onboarding from '@/components/Onboarding';
 import AuthScreen from '@/components/AuthScreen';
-import PremiumUyelik from '@/components/PremiumUyelik';
-
+import { PremiumUyelik } from '@/components/PremiumUyelik'; // <-- SON VE DOĞRU IMPORT
 
 function App() {
   const { user, loading: authLoading } = useAuth();
@@ -23,7 +22,7 @@ function App() {
   const [meals, setMeals] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
 
-  // === DÜZENLEME BURADA YAPILDI: PREMIUM SÜTUNLARI ÇIKARILDI ===
+  // === DÜZELTME YAPILDI: PREMIUM SÜTUNLARI GERİ EKLENDİ ===
   const fetchUserData = React.useCallback(async () => {
     if (!user) return;
 
@@ -33,8 +32,8 @@ function App() {
         id, username, target_calories, created_at, gender,
         age, height, weight, target_weight, goal_type,
         activity_level, start_weight, water_intake,
-        daily_water_goal, last_reset_date 
-        /* plan_tier, ai_usage_count, premium_expires_at buradaydı */
+        daily_water_goal, last_reset_date,
+        plan_tier, ai_usage_count, premium_expires_at // <-- SÜTUNLAR GERİ GELDİ
       `)
       .eq('id', user.id)
       .maybeSingle();
