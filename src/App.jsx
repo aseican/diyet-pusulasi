@@ -12,17 +12,18 @@ import Progress from '@/components/Progress';
 import Profile from '@/components/Profile';
 import Onboarding from '@/components/Onboarding';
 import AuthScreen from '@/components/AuthScreen';
-import { PremiumUyelik } from '@/components/PremiumUyelik'; // <-- SON VE DOĞRU IMPORT
+import { PremiumUyelik } from '@/components/PremiumUyelik'; // DOĞRU IMPORT KULLANILDI
+
 
 function App() {
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = React.useState('dashboard');
-  const [userData, setUserData] = React.useState(null);
+  const [userData, setUserData] = React.useSta...
   const [meals, setMeals] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
 
-  // === DÜZELTME YAPILDI: PREMIUM SÜTUNLARI GERİ EKLENDİ ===
+  // === SON VE TAM SORGUNUZ ===
   const fetchUserData = React.useCallback(async () => {
     if (!user) return;
 
@@ -33,13 +34,14 @@ function App() {
         age, height, weight, target_weight, goal_type,
         activity_level, start_weight, water_intake,
         daily_water_goal, last_reset_date,
-        plan_tier, ai_usage_count, premium_expires_at // <-- SÜTUNLAR GERİ GELDİ
+        plan_tier, ai_usage_count, premium_expires_at // Tüm sütunlar çekiliyor
       `)
       .eq('id', user.id)
       .maybeSingle();
 
     if (error) {
       console.error('Profil yükleme hatası:', error);
+      // Hata alınırsa uyarı gösterilir (bu kısım artık RLS'ten değil, session'dan kaynaklanıyor)
       toast({
         variant: 'destructive',
         title: 'Profil Hatası',
@@ -49,7 +51,6 @@ function App() {
       setUserData(data);
     }
   }, [user, toast]);
-  // ==========================================================
 
   const fetchMeals = React.useCallback(async () => {
     if (!user) return;
