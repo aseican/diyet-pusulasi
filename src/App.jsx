@@ -3,21 +3,20 @@ import { Helmet } from 'react-helmet';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
-import { calculateCalorieTarget } from '@/lib/calculator'; // KALORİ HESAPLAYICI
+import { calculateCalorieTarget } from '@/lib/calculator'; 
 
 import Header from '@/components/Header';
 import BottomNav from '@/components/BottomNav';
-import { Dashboard } from '@/components/Dashboard'; // NAMED IMPORT
-import MealTracker from '@/components/MealTracker';
-import { Progress } from '@/components/Progress'; // NAMED IMPORT
+import { Dashboard } from '@/components/Dashboard'; 
+import { MealTracker } from '@/components/MealTracker'; // <-- SON VE KESİN DÜZELTME BURADA
+import { Progress } from '@/components/Progress'; 
 import Profile from '@/components/Profile';
 import Onboarding from '@/components/Onboarding';
 import AuthScreen from '@/components/AuthScreen';
-import { PremiumUyelik } from '@/components/PremiumUyelik'; // NAMED IMPORT
+import { PremiumUyelik } from '@/components/PremiumUyelik'; 
 
 
-// === SON VE KESİN EXPORT (ROLLUP HATASINI ÇÖZER) ===
-export function App() { 
+function App() {
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = React.useState('dashboard');
@@ -25,7 +24,6 @@ export function App() {
   const [meals, setMeals] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
 
-  // === SON VE KESİN SORGUNUZ (TEK SATIRDA) ===
   const fetchUserData = React.useCallback(async () => {
     if (!user) return;
 
@@ -46,7 +44,6 @@ export function App() {
       setUserData(data);
     }
   }, [user, toast]);
-  // ===========================================
 
   const fetchMeals = React.useCallback(async () => {
     if (!user) return;
@@ -83,7 +80,6 @@ export function App() {
     fetchData();
   }, [user, fetchUserData, fetchMeals]);
 
-  // === MANTIK FIX 1: PROFIL GUNCELLEME (KALORI HESAPLAMA) ===
   const updateUserData = React.useCallback(
     async (newData) => {
       if (!user) return;
@@ -114,7 +110,6 @@ export function App() {
     [user, toast, userData]
   );
 
-  // === MANTIK FIX 2: ONBOARDING TAMAMLAMA (BAŞLANGIÇ KİLOSU VE KALORİ HESAPLAMA) ===
   const handleOnboardingComplete = async (formData) => {
     if (!user) return;
     
@@ -244,4 +239,5 @@ export function App() {
     </>
   );
 }
-// export default App; Bu satır silindi
+
+export default App;
