@@ -1,0 +1,16 @@
+# --- Node / Vite Build ---
+/dist
+/node_modules
+npm-debug.log
+.DS_Store
+
+# --- System and Caching ---
+.env
+.idea
+.vscode/
+
+# --- Supabase CLI and Binaries (GÜVENLİK İÇİN ZORUNLU) ---
+# Sızan anahtarın olduğu ikili dosya
+supabase.exe
+/supabase/bin/
+supabase/db
