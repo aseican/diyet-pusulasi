@@ -13,33 +13,11 @@ import Profile from '@/components/Profile';
 import Onboarding from '@/components/Onboarding';
 import AuthScreen from '@/components/AuthScreen';
 
-// === YENİ BİLEŞEN: ads.txt içeriğini göstermek için ===
-// Google botu "/ads.txt" adresine gelince bu bileşen çalışacak.
-const AdsTxtComponent = () => {
-  // === SİZİN ADS.TXT KODUNUZ BURAYA EKLENDİ ===
-  const adsTxtContent = 'google.com, pub-3033052396800988, DIRECT, f08c47fec0942fa0';
 
-  // Google botunun okuyabilmesi için düz metin olarak (pre tagı) döndürüyoruz
-  return (
-    <pre style={{ margin: 0, fontFamily: 'monospace' }}>
-      {adsTxtContent}
-    </pre>
-  );
-};
-// === YENİ BİLEŞEN BİTTİ ===
 
 
 function App() {
-  // === YENİ KONTROL: URL'yi kontrol et ===
-  // Tarayıcının adres çubuğundaki yolu alır (örn: "/dashboard" veya "/ads.txt")
-  const currentPath = window.location.pathname;
-
-  // Eğer adres tam olarak "/ads.txt" ise, normal uygulamayı değil,
-  // sadece ads.txt içeriğini göster.
-  if (currentPath === '/ads.txt') {
-    return <AdsTxtComponent />;
-  }
-  // === KONTROL BİTTİ ===
+ 
 
 
   // ----- BURADAN AŞAĞISI SİZİN MEVCUT KODUNUZ -----
