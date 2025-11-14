@@ -1,99 +1,232 @@
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Check, X } from 'lucide-react';
+import React from 'react';
+import { Helmet } from 'react-helmet';
+import { useAuth } from '@/contexts/SupabaseAuthContext';
+import { supabase } from '@/lib/customSupabaseClient';
+import { useToast } from '@/components/ui/use-toast';
 
-// Ödeme sistemi entegrasyonundan sonra buraya kullanıcının plan verileri gelecek
-// Şimdilik default planlar
-const plans = [
-    {
-        title: 'Ücretsiz',
-        price: '₺0 / Süresiz',
-        description: 'Uygulamanın temel özelliklerini kullanın.',
-        features: [
-            { name: 'Kalori Takibi', available: true },
-            { name: 'Su Takibi', available: true },
-            { name: 'Sınırlı AI Analizi (Günde 1)', available: true },
-            { name: 'Gelişmiş Raporlama', available: false },
-        ],
-        buttonText: 'Mevcut Planınız',
-        isCurrent: true,
-        className: 'border-emerald-500 bg-emerald-50/50',
-    },
-    {
-        title: 'Basic Premium',
-        price: '₺59 / Aylık',
-        description: 'AI özellikleriyle hedeflerinize daha hızlı ulaşın.',
-        features: [
-            { name: 'Kalori Takibi', available: true },
-            { name: 'Su Takibi', available: true },
-            { name: 'Sınırsız AI Analizi', available: true },
-            { name: 'Gelişmiş Raporlama', available: false },
-        ],
-        buttonText: 'Şimdi Abone Ol',
-        isCurrent: false,
-        className: 'border-blue-500',
-    },
-    {
-        title: 'Pro Premium',
-        price: '₺99 / Aylık',
-        description: 'Tüm kısıtlamaları kaldırın, tam potansiyelinizi kullanın.',
-        features: [
-            { name: 'Kalori Takibi', available: true },
-            { name: 'Su Takibi', available: true },
-            { name: 'Sınırsız AI Analizi', available: true },
-            { name: 'Gelişmiş Raporlama', available: true },
-        ],
-        buttonText: 'En Popüler Seçim',
-        isCurrent: false,
-        className: 'border-indigo-500 shadow-xl',
-    },
-];
+import Header from '@/components/Header';
+import BottomNav from '@/components/BottomNav';
+import Dashboard from '@/components/Dashboard';
+import MealTracker from '@/components/MealTracker';
+import Progress from '@/components/Progress';
+import Profile from '@/components/Profile';
+import Onboarding from '@/components/Onboarding';
+import AuthScreen from '@/components/AuthScreen';
+import { PremiumUyelik } from '@/components/PremiumUyelik';
 
-const FeatureItem = ({ name, available }) => (
-    <div className={`flex items-center text-sm ${available ? 'text-foreground' : 'text-muted-foreground line-through'}`}>
-        {available ? <Check className="w-4 h-4 mr-2 text-emerald-500" /> : <X className="w-4 h-4 mr-2 text-red-400" />}
-        {name}
-    </div>
-);
 
-export const PremiumUyelik = () => {
+function App() {
+  const { user, loading: authLoading } = useAuth();
+  const { toast } = useToast();
+  const [activeTab, setActiveTab] = React.useState('dashboard');
+  const [userData, setUserData] = React.useState(null);
+  const [meals, setMeals] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+
+  // === SON VE KESİN SORGUNUZ: TEK SATIRA İNDİRİLDİ ===
+  const fetchUserData = React.useCallback(async () => {
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id,username,target_calories,created_at,gender,age,height,weight,target_weight,goal_type,activity_level,start_weight,water_intake,daily_water_goal,last_reset_date,plan_tier,ai_usage_count,premium_expires_at')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Profil yükleme hatası:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Profil Hatası',
+        description: 'Profiliniz yüklenirken bir hata oluştu.',
+      });
+    } else {
+      setUserData(data);
+    }
+  }, [user, toast]);
+
+  const fetchMeals = React.useCallback(async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from('added_meals')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Öğün yükleme hatası:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Öğün Hatası',
+        description: 'Öğünler yüklenirken bir hata oluştu.',
+      });
+    } else {
+      setMeals(data);
+    }
+  }, [user, toast]);
+
+  React.useEffect(() => {
+    const fetchData = async () => {
+      if (user) {
+        setLoading(true);
+        await Promise.all([fetchUserData(), fetchMeals()]);
+        setLoading(false);
+      } else {
+        setUserData(null);
+        setMeals([]);
+        setLoading(false); 
+      }
+    };
+    fetchData();
+  }, [user, fetchUserData, fetchMeals]);
+
+  const updateUserData = React.useCallback(
+    async (newData) => {
+      if (!user) return;
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(newData)
+        .eq('id', user.id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Profil güncelleme hatası:', error);
+        toast({
+          variant: 'destructive',
+          title: 'Güncelleme Hatası',
+          description: 'Profiliniz güncellenirken bir hata oluştu.',
+        });
+      } else {
+        setUserData(data);
+        toast({ title: 'Başarılı!', description: 'Bilgileriniz güncellendi.' });
+      }
+    },
+    [user, toast]
+  );
+
+  const handleOnboardingComplete = async (formData) => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from('profiles')
+      .insert([{ ...formData, id: user.id }])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Profil kayıt hatası:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Kayıt Hatası',
+        description: 'Bilgiler kaydedilirken bir hata oluştu. RLS politikasını kontrol edin.',
+      });
+    } else {
+      setUserData(data);
+      toast({
+        title: 'Hoş Geldin!',
+        description: 'Profilin başarıyla oluşturuldu 💚',
+      });
+    }
+  };
+
+  const addMeal = async (mealData) => {
+    if (!user) return;
+    const mealWithUser = { ...mealData, user_id: user.id };
+    const { error } = await supabase.from('added_meals').insert([mealWithUser]);
+
+    if (error) {
+      console.error('Öğün ekleme hatası:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Hata',
+        description: 'Öğün eklenirken bir sorun oluştu.',
+      });
+    } else {
+      fetchMeals();
+    }
+  };
+
+  const deleteMeal = async (mealId) => {
+    if (!user) return;
+    const { error } = await supabase
+      .from('added_meals')
+      .delete()
+      .eq('id', mealId);
+
+    if (error) {
+      console.error('Öğün silme hatası:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Hata',
+        description: 'Öğün silinirken bir sorun oluştu.',
+      });
+    } else {
+      setMeals((prev) => prev.filter((m) => m.id !== mealId));
+      toast({ title: 'Başarılı!', description: 'Öğün başarıyla silindi.' });
+    }
+  };
+
+  if (authLoading || (user && loading)) {
     return (
-        <div className="p-4 space-y-8 max-w-lg mx-auto">
-            <h1 className="text-3xl font-bold text-center">Premium Üyelik Planları</h1>
-            <p className="text-center text-muted-foreground">Hedeflerinize ulaşmanız için tasarlanmış, size özel çözümler.</p>
-
-            {/* UI Fix: Grid ile taşma önleniyor */}
-            <div className="grid grid-cols-1 gap-4">
-                {plans.map((plan) => (
-                    <Card key={plan.title} className={`shadow-md hover:shadow-lg transition-shadow ${plan.className}`}>
-                        <CardHeader className="text-center pb-3">
-                            <CardTitle className="text-2xl">{plan.title}</CardTitle>
-                            <CardDescription className="text-lg font-semibold text-foreground">
-                                {plan.price}
-                            </CardDescription>
-                            <CardDescription className="pt-2">{plan.description}</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
-                            {plan.features.map((feature, index) => (
-                                <FeatureItem key={index} {...feature} />
-                            ))}
-                        </CardContent>
-                        <CardFooter>
-                            <Button 
-                                className="w-full"
-                                disabled={plan.isCurrent}
-                                variant={plan.isCurrent ? "outline" : "default"}
-                            >
-                                {plan.buttonText}
-                            </Button>
-                        </CardFooter>
-                    </Card>
-                ))}
-            </div>
-
-            <div className="text-center text-sm text-muted-foreground pt-4">
-                Tüm Premium planlar 7 günlük ücretsiz deneme süresi içerir. İstediğiniz zaman iptal edebilirsiniz.
-            </div>
-        </div>
+      <div className="mobile-container flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600"></div>
+      </div>
     );
-};
+  }
+
+  if (!user) {
+    return <AuthScreen />;
+  }
+
+  if (!userData) {
+    return (
+      <>
+        <Helmet>
+          <title>Profil Oluştur - Diyet Takip</title>
+        </Helmet>
+        <div className="mobile-container">
+          <Onboarding onComplete={handleOnboardingComplete} />
+        </div>
+      </>
+    );
+  }
+
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'dashboard':
+        return (
+          <Dashboard
+            userData={userData}
+            meals={meals}
+            updateUserData={updateUserData}
+            deleteMeal={deleteMeal}
+          />
+        );
+      case 'meals':
+        return <MealTracker addMeal={addMeal} />;
+      case 'progress':
+        return <Progress userData={userData} />;
+      case 'profile':
+        return <Profile userData={userData} updateUserData={updateUserData} />;
+      case 'premium': 
+        return <PremiumUyelik />; 
+      default:
+        return <Dashboard userData={userData} meals={meals} updateUserData={updateUserData} deleteMeal={deleteMeal} />;
+    }
+  };
+
+  return (
+    <>
+      <Helmet>
+        <title>Kalori & Diyet Takip - {userData?.username || 'Kullanıcı'}</title>
+      </Helmet>
+      <div className="mobile-container">
+        <Header userData={userData} />
+        <main className="pb-20 pt-16">{renderContent()}</main>
+        <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
+      </div>
+    </>
+  );
+}
+
+export default App;
