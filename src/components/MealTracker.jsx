@@ -212,22 +212,24 @@ const handleAnalyze = async () => {
           .getPublicUrl(filePath);
 
         publicUrl = publicData.publicUrl;
+// BURAYA EKLİYORUZ (115. SATIR CIVARI):
+console.log("DEBUG: Image URL for AI:", publicUrl);
 
         const { data: { session } } = await supabase.auth.getSession();
         
         if (!session?.access_token) throw new Error("Oturum belirteci (token) eksik.");
 
         // 3) Edge Function Çağır (FIX: Tek Config Objesi Kullanıldı - 400 Hatasını Çözer)
-        const { data: analysisResult, error: functionError } = await supabase.functions.invoke(
-          "analyze-food-image",
-          { 
-            body: { imageUrl: publicUrl }, // Tek JSON gövdesi
-            headers: {
-              Authorization: `Bearer ${session.access_token}`, // Yetki Başlığı
-              "Content-Type": "application/json", // Payload'un JSON olduğunu belirtir
-            },
-          }
-        );
+        const { data, error } = await supabase.functions.invoke(
+  "analyze-food-image",
+  {
+    body: JSON.stringify({ imageUrl }),   // ← JSON.stringify ZORUNLU
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      "Content-Type": "application/json",
+    },
+  }
+);
 
         if (functionError) throw functionError;
         
