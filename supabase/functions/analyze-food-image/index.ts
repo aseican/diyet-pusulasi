@@ -10,7 +10,6 @@ const QUOTA_LIMITS = {
   kapsamli: 50,
 };
 
-// CORS headers
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -19,18 +18,17 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  // Initialize Supabase client
+  // Supabase client
   const supabase = createClient(
     Deno.env.get("PROJECT_URL"),
     Deno.env.get("SECRET_KEY")
   );
 
-  // Auth token
+  // AUTH
   const authHeader = req.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "");
 
@@ -45,26 +43,25 @@ Deno.serve(async (req) => {
     });
   }
 
-  // ---- GET USER PROFILE SAFELY ----
+  // Profile
   const { data: profile } = await supabase
     .from("profiles")
     .select("plan_tier, ai_usage_count, ai_usage_last_reset")
     .eq("id", user.id)
     .maybeSingle();
 
-  // If profile is null → fallback default values
   const safeProfile = profile ?? {
     plan_tier: "free",
     ai_usage_count: 0,
     ai_usage_last_reset: null,
   };
 
+  // Daily quota
   const today = new Date().toISOString().split("T")[0];
   const lastReset =
     safeProfile.ai_usage_last_reset?.split("T")[0] ?? null;
 
-  const usage =
-    lastReset === today ? safeProfile.ai_usage_count : 0;
+  const usage = lastReset === today ? safeProfile.ai_usage_count : 0;
 
   if (usage >= QUOTA_LIMITS[safeProfile.plan_tier]) {
     return new Response(JSON.stringify({ error: "Quota exceeded" }), {
@@ -73,7 +70,6 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Update usage count
   await supabase
     .from("profiles")
     .update({
@@ -82,8 +78,11 @@ Deno.serve(async (req) => {
     })
     .eq("id", user.id);
 
-  // Read body safely
+  // ⭐ BODY BURADA OKUNUYOR — DOĞRUSU BU ⭐
   const body = await req.json().catch(() => null);
+
+  console.log("RAW BODY => ", body);
+
   if (!body || !body.imageUrl) {
     return new Response(JSON.stringify({ error: "Missing imageUrl" }), {
       status: 400,
@@ -93,7 +92,7 @@ Deno.serve(async (req) => {
 
   const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
-  // Send request to OpenAI
+  // ⭐ OPENAI ANALİZ İSTEĞİ ⭐
   const aiRes = await fetch(OPENAI_API_URL, {
     method: "POST",
     headers: {
@@ -109,11 +108,14 @@ Deno.serve(async (req) => {
           content: [
             {
               type: "text",
-              text: "Bu fotoğrafı analiz et ve JSON formatında detaylı besin bilgisi döndür.",
+              text: "Bu fotoğrafı analiz et ve JSON formatında besin bilgisi döndür.",
             },
             {
               type: "image_url",
-              image_url: { url: body.imageUrl, detail: "low" },
+              image_url: {
+                url: body.imageUrl,
+                detail: "low",
+              },
             },
           ],
         },
@@ -122,6 +124,8 @@ Deno.serve(async (req) => {
   });
 
   const result = await aiRes.json();
+
+  console.log("OPENAI RAW RESPONSE:", result);
 
   if (!result?.choices?.[0]?.message?.content) {
     return new Response(

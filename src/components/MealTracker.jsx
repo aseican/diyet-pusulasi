@@ -202,11 +202,18 @@ export const MealTracker = ({ addMeal }) => {
       }
 
       // 2) Public URL
-      const { data: publicData } = supabase.storage
-        .from(FOOD_BUCKET)
-        .getPublicUrl(filePath);
+      const { data: publicData } = supabase
+  .storage
+  .from(FOOD_BUCKET)
+  .getPublicUrl(filePath);
 
-      const imageUrl = publicData.publicUrl;
+const imageUrl = publicData?.publicUrl;
+
+if (!imageUrl) {
+  console.error("PUBLIC URL OLUŞMADI!", publicData);
+  return;
+}
+
 
       // 3) Token Al
       const {
@@ -225,17 +232,15 @@ export const MealTracker = ({ addMeal }) => {
 
       // 4) Edge Function Çağır
       const { data, error } = await supabase.functions.invoke(
-        'analyze-food-image',
-        {
-          body: { imageUrl },
-          headers: {
-           Authorization: `Bearer ${session.access_token}`,
-           'Content-Type': 'application/json',
-          },
+  "analyze-food-image",
+  {
+    body: { imageUrl },   // JSON.stringify YOK
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+    },
+  }
+);
 
-
-        }
-      );
 
       if (error) {
         console.error('EDGE ERROR:', error);
