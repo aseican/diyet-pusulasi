@@ -1,9 +1,14 @@
+// ======================================================================
+//                        FULL & WORKING MealTracker.jsx
+// ======================================================================
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
+import { FunctionsHttpError } from '@supabase/supabase-js';
 import { Search, Plus, Utensils, Drumstick, Apple, Coffee, Loader2, Zap, Camera } from 'lucide-react';
 import {
   Dialog,
@@ -23,16 +28,15 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
-import { v4 as uuidv4 } from 'uuid'; 
-import { FunctionsHttpError } from '@supabase/supabase-js'; // <-- SADECE BU SATIR KALMALIYDI
+import { v4 as uuidv4 } from 'uuid';
 
-const FOOD_BUCKET = 'food-images'; 
+const FOOD_BUCKET = "food-images";
 
 export const MealTracker = ({ addMeal }) => {
   const { toast } = useToast();
   const { user, userData } = useAuth();
-  
-  // --- STATE'LER ---
+
+  // STATE'LER
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -40,41 +44,52 @@ export const MealTracker = ({ addMeal }) => {
   const [quantity, setQuantity] = useState(100);
   const [unit, setUnit] = useState('gram');
   const [mealType, setMealType] = useState('Kahvaltı');
+
   const [aiFile, setAiFile] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState(null); 
-  
-  // KOTA
-  const quotaLimit = (() => {
-    switch (userData?.plan_tier) {
-      case 'basic': return 10; 
-      case 'pro': return 30;   
-      case 'kapsamli': return 50;
-      default: return 3; 
-    }
-  })();
-  const currentQuota = userData?.ai_usage_count || 0; 
+  const [analysisResult, setAnalysisResult] = useState(null);
+
+  // KOTA HESABI
+  const quotaLimit =
+    userData?.plan_tier === 'basic'
+      ? 10
+      : userData?.plan_tier === 'pro'
+      ? 30
+      : userData?.plan_tier === 'kapsamli'
+      ? 50
+      : 3;
+
+  const currentQuota = userData?.ai_usage_count || 0;
   const isQuotaReached = currentQuota >= quotaLimit;
 
-  // Yiyecek arama ve debounce mantıkları
+  // =====================================================
+  //                     SEARCH FOODS
+  // =====================================================
   const searchFoods = useCallback(async () => {
     if (searchTerm.trim().length < 2) {
       setSearchResults([]);
       return;
     }
+
     setLoading(true);
+
     const { data, error } = await supabase
       .from('foods')
       .select('id, name_tr, calories, protein, carbs, fat, gram, category')
-      .ilike('name_tr', `%${searchTerm.trim()}%`)
+      .ilike('name_tr', `%${searchTerm}%`)
       .limit(50);
 
     if (error) {
-      console.error('Error searching foods:', error);
-      toast({ variant: 'destructive', title: 'Arama Hatası', description: 'Yiyecekler aranırken bir hata oluştu.' });
+      console.error(error);
+      toast({
+        variant: 'destructive',
+        title: 'Arama Hatası',
+        description: 'Yiyecekler aranırken bir hata oluştu.',
+      });
     } else {
       setSearchResults(data);
     }
+
     setLoading(false);
   }, [searchTerm, toast]);
 
@@ -83,25 +98,39 @@ export const MealTracker = ({ addMeal }) => {
     return () => clearTimeout(t);
   }, [searchTerm, searchFoods]);
 
+  // =====================================================
+  //                MANUEL YEMEK EKLEME
+  // =====================================================
   const getMultiplier = (unit, food) => {
     const servingSize = food.gram || 100;
+
     switch (unit) {
-      case 'gram': return quantity / 100;
-      case 'adet': return (quantity * servingSize) / 100;
-      case 'porsiyon': return (quantity * servingSize) / 100;
-      case 'bardak': return (quantity * 200) / 100; 
-      case 'kasik': return (quantity * 15) / 100; 
-      default: return quantity / 100;
+      case 'gram':
+        return quantity / 100;
+      case 'adet':
+      case 'porsiyon':
+        return (quantity * servingSize) / 100;
+      case 'bardak':
+        return (quantity * 200) / 100;
+      case 'kasik':
+        return (quantity * 15) / 100;
+      default:
+        return quantity / 100;
     }
   };
 
   const handleAddMeal = () => {
     if (!selectedFood || !quantity || quantity <= 0) {
-      toast({ variant: 'destructive', title: 'Eksik Bilgi', description: 'Lütfen miktarı giriniz.' });
+      toast({
+        variant: 'destructive',
+        title: 'Eksik Bilgi',
+        description: 'Lütfen miktarı giriniz.',
+      });
       return;
     }
-    
+
     const multiplier = getMultiplier(unit, selectedFood);
+
     const meal = {
       meal_type: mealType,
       food_name: selectedFood.name_tr,
@@ -109,41 +138,25 @@ export const MealTracker = ({ addMeal }) => {
       protein: parseFloat((selectedFood.protein * multiplier).toFixed(1)),
       carbs: parseFloat((selectedFood.carbs * multiplier).toFixed(1)),
       fat: parseFloat((selectedFood.fat * multiplier).toFixed(1)),
-      quantity: quantity,
-      unit: unit,
+      quantity,
+      unit,
       user_id: user.id,
       date: new Date().toISOString().split('T')[0],
     };
-    
-    addMeal(meal); 
-    setSelectedFood(null); 
+
+    addMeal(meal);
+    setSelectedFood(null);
     setSearchTerm('');
     setSearchResults([]);
-    toast({ title: 'Öğün Eklendi', description: `${meal.food_name} başarıyla eklendi.` });
-  };
-  
-  const FoodIcon = ({ category }) => {
-    const defaultProps = { className: 'w-6 h-6 text-emerald-600' };
-    switch (category) {
-      case 'kahvalti': return <Coffee {...defaultProps} />;
-      case 'ana_yemek': return <Drumstick {...defaultProps} />;
-      case 'ara_ogun': return <Apple {...defaultProps} />;
-      default: return <Utensils {...defaultProps} />;
-    }
-  };
 
-  const calculatedMacros = selectedFood
-    ? (() => {
-        const multiplier = getMultiplier(unit, selectedFood);
-        const totalMultiplier = quantity * multiplier;
-        return {
-            calories: (selectedFood.calories * totalMultiplier).toFixed(0),
-            protein: (selectedFood.protein * totalMultiplier).toFixed(1),
-            carbs: (selectedFood.carbs * totalMultiplier).toFixed(1),
-            fat: (selectedFood.fat * totalMultiplier).toFixed(1),
-        };
-      })()
-    : null;
+    toast({
+      title: 'Öğün Eklendi',
+      description: `${meal.food_name} başarıyla eklendi.`,
+    });
+  };
+    // =====================================================
+  //                     AI ANALYZE
+  // =====================================================
 
   const handleFileChange = (e) => {
     if (e.target.files?.length > 0) {
@@ -153,76 +166,98 @@ export const MealTracker = ({ addMeal }) => {
   };
 
   const handleAnalyze = async () => {
-    let publicUrl = null;
-    let filePath = null;
-
     if (!aiFile || !user || isAnalyzing) return;
 
     setIsAnalyzing(true);
     setAnalysisResult(null);
 
-    // KOTA KONTROLÜ
+    const quotaLimit = (() => {
+      switch (userData?.plan_tier) {
+        case 'basic': return 10;
+        case 'pro': return 30;
+        case 'kapsamli': return 50;
+        default: return 3;
+      }
+    })();
+
+    const currentQuota = userData?.ai_usage_count || 0;
+    const isQuotaReached = currentQuota >= quotaLimit;
+
     if (isQuotaReached) {
-      toast({ variant: 'destructive', title: 'Limit Doldu', description: `Günlük ${quotaLimit} analiz hakkınızı kullandınız. Lütfen planınızı yükseltin.` });
+      toast({
+        variant: 'destructive',
+        title: 'Limit Doldu',
+        description: `Günlük ${quotaLimit} analiz hakkınızı kullandınız.`,
+      });
       setIsAnalyzing(false);
       return;
     }
 
+    let publicUrl = null;
+    let filePath = null;
+
     try {
-      // 1) Upload (Benzersiz isim ile)
+      // 1) Upload
       const ext = aiFile.name.split('.').pop();
       const fileName = `${uuidv4()}.${ext}`;
-      filePath = `user-images/${fileName}`; // Dosya yolu
+      filePath = `${user.id}/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from(FOOD_BUCKET)
         .upload(filePath, aiFile);
 
-      if (uploadError) throw new Error('Fotoğraf yüklenemedi: ' + uploadError.message);
+      if (uploadError) {
+        throw new Error("Fotoğraf yüklenemedi: " + uploadError.message);
+      }
 
-      // 2) Public URL'yi Al ve Token
+      // 2) Public URL
       const { data: publicData } = supabase.storage
         .from(FOOD_BUCKET)
         .getPublicUrl(filePath);
 
-      publicUrl = publicData.publicUrl; 
+      publicUrl = publicData.publicUrl;
 
+      // 3) Token
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) throw new Error('Oturum belirteci (token) eksik.');
 
-      // 3) Edge Function Çağır (DOĞRU SYNTAX)
-      const { data, error } = await supabase.functions.invoke('analyze-food-image', {
-        body: JSON.stringify({ imageUrl: publicUrl }), // Tek JSON gövdesi
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      if (!session?.access_token) {
+        throw new Error("Oturum bulunamadı.");
+      }
 
-      if (error) throw error; // Edge function'dan gelen hatayı yakala
+      // 4) Edge Function Çağrısı (doğru invoke formatı)
+      const { data, error } = await supabase.functions.invoke(
+        "analyze-food-image",
+        {
+          body: { imageUrl: publicUrl },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      // Edge Function Error Handling
+      if (error) {
+        if (error instanceof FunctionsHttpError) {
+          const details = await error.context.json();
+          console.error("Function Error:", details);
+          throw new Error(details?.error || "AI işleme hatası.");
+        }
+        throw error;
+      }
 
       setAnalysisResult(data);
-    } catch (err) {
-      console.error('ANALİZ/YÜKLEME HATASI:', err);
 
-      let description = 'İşlem sırasında beklenmeyen bir sorun oluştu.';
-      
-      if (err instanceof FunctionsHttpError) {
-          const responseData = await err.context.json();
-          description = responseData?.error || responseData?.message || description;
-      } else if (err.message.includes('token eksik')) {
-           description = 'Oturum süresi doldu. Lütfen tekrar giriş yapın.';
-      } else if (err.message.includes('Dosya yüklenemedi')) {
-           description = err.message;
-      }
+    } catch (err) {
+      console.error("ANALİZ HATASI:", err);
 
       toast({
         variant: 'destructive',
         title: 'Analiz Başarısız',
-        description,
+        description: err.message || 'Bilinmeyen bir hata oluştu.',
       });
     } finally {
-      // Storage'dan Resmi Sil (Hata oluşsa bile)
+      // Temizlik
       if (filePath) {
         await supabase.storage.from(FOOD_BUCKET).remove([filePath]);
       }
@@ -255,13 +290,37 @@ export const MealTracker = ({ addMeal }) => {
       description: `${meal.food_name} başarıyla kaydedildi.`,
     });
   };
+    // =====================================================
+  //                        UI
+  // =====================================================
+  const FoodIcon = ({ category }) => {
+    const p = { className: 'w-6 h-6 text-emerald-600' };
+    if (category === 'kahvalti') return <Coffee {...p} />;
+    if (category === 'ana_yemek') return <Drumstick {...p} />;
+    if (category === 'ara_ogun') return <Apple {...p} />;
+    return <Utensils {...p} />;
+  };
 
-  // UI MANTIĞI VE DÖNÜŞ (return)
+  const calculatedMacros = selectedFood
+    ? (() => {
+        const multiplier = getMultiplier(unit, selectedFood);
+        const total = quantity * multiplier;
+        return {
+          calories: (selectedFood.calories * total).toFixed(0),
+          protein: (selectedFood.protein * total).toFixed(1),
+          carbs: (selectedFood.carbs * total).toFixed(1),
+          fat: (selectedFood.fat * total).toFixed(1),
+        };
+      })()
+    : null;
+
   return (
     <div className="p-4 space-y-6">
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
         <h1 className="text-2xl font-bold text-gray-800">Öğün Ekle</h1>
-        <p className="text-gray-500">Geniş veritabanımızdan arayarak öğünlerinizi ekleyin.</p>
+        <p className="text-gray-500">
+          Geniş veritabanından yiyecek arayın veya fotoğrafla analiz edin.
+        </p>
       </motion.div>
 
       <Tabs defaultValue="manual" className="w-full">
@@ -272,7 +331,7 @@ export const MealTracker = ({ addMeal }) => {
           </TabsTrigger>
         </TabsList>
 
-        {/* 1. MANUEL GİRİŞ TABI */}
+        {/* MANUEL ARAMA TAB */}
         <TabsContent value="manual" className="p-4 space-y-4 bg-white shadow rounded-b-lg">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
@@ -308,9 +367,7 @@ export const MealTracker = ({ addMeal }) => {
                       <FoodIcon category={food.category} />
                       <div>
                         <p className="font-semibold">{food.name_tr}</p>
-                        <p className="text-sm text-gray-500">
-                          {food.calories} kcal
-                        </p>
+                        <p className="text-sm text-gray-500">{food.calories} kcal</p>
                       </div>
                     </div>
                     <Plus className="w-5 h-5 text-emerald-600" />
@@ -319,65 +376,84 @@ export const MealTracker = ({ addMeal }) => {
               )}
             </AnimatePresence>
           </div>
+
+          {!loading && searchResults.length === 0 && searchTerm.trim().length >= 2 && (
+            <p className="text-center text-sm text-gray-500">Sonuç bulunamadı.</p>
+          )}
         </TabsContent>
 
-        {/* 2. YAPAY ZEKÂ TABI */}
+        {/* AI TAB */}
         <TabsContent value="ai" className="p-4 space-y-4 bg-white shadow rounded-b-lg">
-          {/* KOTA AŞIMI veya SONUÇ EKRANI */}
           {isQuotaReached && !analysisResult ? (
             <div className="text-center p-6 bg-red-50 border border-red-300 rounded-lg">
               <Zap className="mx-auto h-8 w-8 text-red-500" />
               <h3 className="font-semibold text-red-600 mt-2">Günlük Limit Doldu</h3>
-              <p className="text-sm text-red-700">
-                Günlük **{quotaLimit}** adet AI analiz hakkınızı kullandınız. Lütfen planınızı yükseltin.
-              </p>
-              <Button className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700">Premium’a Yükselt</Button>
+              <p className="text-sm text-red-700">Günlük hakkınız: {quotaLimit}</p>
+              <Button className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700">
+                Premium’a Yükselt
+              </Button>
             </div>
           ) : analysisResult ? (
             <div className="space-y-4">
-              <h3 className="text-lg font-bold text-gray-800">Analiz Sonucu: {analysisResult.name}</h3>
+              <h3 className="text-lg font-bold text-gray-800">
+                Analiz Sonucu: {analysisResult.name}
+              </h3>
+
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="p-3 bg-gray-100 rounded-lg">
-                  Kcal: <span className="font-bold text-emerald-600">{analysisResult.calories}</span>
-                </div>
-                <div className="p-3 bg-gray-100 rounded-lg">
-                  Protein: <span className="font-bold">{analysisResult.protein.toFixed(1)}g</span>
-                </div>
-                <div className="p-3 bg-gray-100 rounded-lg">
-                  Karbonhidrat: <span className="font-bold">{analysisResult.carbs.toFixed(1)}g</span>
-                </div>
-                <div className="p-3 bg-gray-100 rounded-lg">
-                  Yağ: <span className="font-bold">{analysisResult.fat.toFixed(1)}g</span>
-                </div>
-                <div className="col-span-2 p-3 bg-gray-100 rounded-lg">
-                  Miktar: <span className="font-bold">
-                    {analysisResult.quantity} {analysisResult.unit}
+                  Kcal:{' '}
+                  <span className="font-bold text-emerald-600">
+                    {analysisResult.calories}
                   </span>
                 </div>
+                <div className="p-3 bg-gray-100 rounded-lg">
+                  Protein: {analysisResult.protein}g
+                </div>
+                <div className="p-3 bg-gray-100 rounded-lg">
+                  Karbonhidrat: {analysisResult.carbs}g
+                </div>
+                <div className="p-3 bg-gray-100 rounded-lg">
+                  Yağ: {analysisResult.fat}g
+                </div>
+                <div className="col-span-2 p-3 bg-gray-100 rounded-lg">
+                  Miktar: {analysisResult.quantity} {analysisResult.unit}
+                </div>
               </div>
-              <Button onClick={handleConfirmMealFromAI} className="w-full bg-emerald-600 hover:bg-emerald-700">
+
+              <Button
+                onClick={handleConfirmMealFromAI}
+                className="w-full bg-emerald-600 hover:bg-emerald-700"
+              >
                 Öğün Olarak Kaydet
               </Button>
-              <Button onClick={() => setAnalysisResult(null)} variant="outline" className="w-full">
+
+              <Button
+                variant="outline"
+                onClick={() => setAnalysisResult(null)}
+                className="w-full"
+              >
                 Yeni Analiz
               </Button>
             </div>
           ) : (
-            <div className="space-y-3 pt-2">
+            <div className="space-y-3">
               <input
                 type="file"
-                onChange={handleFileChange}
                 accept="image/*"
                 id="upload-ai"
                 className="hidden"
+                onChange={handleFileChange}
               />
+
               <Label
                 htmlFor="upload-ai"
                 className="cursor-pointer flex flex-col items-center justify-center p-8 border-2 border-emerald-300 border-dashed rounded-lg hover:bg-emerald-50"
               >
                 <Camera className="h-8 w-8 text-emerald-500" />
                 <p className="mt-2 font-medium text-emerald-700">Yemek Fotoğrafı Yükle</p>
-                {aiFile && <p className="text-sm text-gray-500 mt-2">Seçilen Dosya: {aiFile.name}</p>}
+                {aiFile && (
+                  <p className="text-sm text-gray-800 mt-2">{aiFile.name}</p>
+                )}
               </Label>
 
               <Button
@@ -400,7 +476,7 @@ export const MealTracker = ({ addMeal }) => {
           )}
 
           <p className="text-xs text-center text-gray-500">
-            Kalan hakkınız: {Math.max(0, quotaLimit - currentQuota)}. Günlük toplam hakkınız: {quotaLimit}.
+            Kalan hakkınız: {Math.max(0, quotaLimit - currentQuota)}
           </p>
         </TabsContent>
       </Tabs>
@@ -409,7 +485,7 @@ export const MealTracker = ({ addMeal }) => {
       <Dialog open={!!selectedFood} onOpenChange={(v) => !v && setSelectedFood(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Öğün Ekle: {selectedFood?.name_tr}</DialogTitle>
+            <DialogTitle>{selectedFood?.name_tr}</DialogTitle>
             <DialogDescription>Miktar ve öğün türünü seç.</DialogDescription>
           </DialogHeader>
 
@@ -459,15 +535,14 @@ export const MealTracker = ({ addMeal }) => {
             {calculatedMacros && (
               <div className="p-3 bg-emerald-50 border rounded-lg text-sm">
                 <p className="font-semibold text-gray-800">Hesaplanan Değerler:</p>
-                <p>
-                  Kalori: <b>{calculatedMacros.calories} kcal</b>
-                </p>
+                <p>Kalori: <b>{calculatedMacros.calories} kcal</b></p>
                 <p>Protein: {calculatedMacros.protein} g</p>
                 <p>Karbonhidrat: {calculatedMacros.carbs} g</p>
                 <p>Yağ: {calculatedMacros.fat} g</p>
               </div>
             )}
           </div>
+
           <DialogFooter>
             <Button
               onClick={handleAddMeal}
@@ -481,3 +556,5 @@ export const MealTracker = ({ addMeal }) => {
     </div>
   );
 };
+
+export default MealTracker;
