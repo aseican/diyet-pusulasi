@@ -8,7 +8,6 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { FunctionsHttpError } from '@supabase/supabase-js';
 import { Search, Plus, Utensils, Drumstick, Apple, Coffee, Loader2, Zap, Camera } from 'lucide-react';
 import {
   Dialog,
@@ -49,7 +48,7 @@ export const MealTracker = ({ addMeal }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
 
-  // KOTA HESABI
+  // KOTA
   const quotaLimit =
     userData?.plan_tier === 'basic'
       ? 10
@@ -154,10 +153,10 @@ export const MealTracker = ({ addMeal }) => {
       description: `${meal.food_name} başarıyla eklendi.`,
     });
   };
-    // =====================================================
+
+  // =====================================================
   //                     AI ANALYZE
   // =====================================================
-
   const handleFileChange = (e) => {
     if (e.target.files?.length > 0) {
       setAiFile(e.target.files[0]);
@@ -171,18 +170,6 @@ export const MealTracker = ({ addMeal }) => {
     setIsAnalyzing(true);
     setAnalysisResult(null);
 
-    const quotaLimit = (() => {
-      switch (userData?.plan_tier) {
-        case 'basic': return 10;
-        case 'pro': return 30;
-        case 'kapsamli': return 50;
-        default: return 3;
-      }
-    })();
-
-    const currentQuota = userData?.ai_usage_count || 0;
-    const isQuotaReached = currentQuota >= quotaLimit;
-
     if (isQuotaReached) {
       toast({
         variant: 'destructive',
@@ -193,21 +180,25 @@ export const MealTracker = ({ addMeal }) => {
       return;
     }
 
-    let publicUrl = null;
-    let filePath = null;
-
     try {
       // 1) Upload
       const ext = aiFile.name.split('.').pop();
       const fileName = `${uuidv4()}.${ext}`;
-      filePath = `${user.id}/${fileName}`;
+      const filePath = `${user.id}/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from(FOOD_BUCKET)
         .upload(filePath, aiFile);
 
       if (uploadError) {
-        throw new Error("Fotoğraf yüklenemedi: " + uploadError.message);
+        console.error(uploadError);
+        toast({
+          variant: 'destructive',
+          title: 'Yükleme Hatası',
+          description: 'Fotoğraf yüklenemedi.',
+        });
+        setIsAnalyzing(false);
+        return;
       }
 
       // 2) Public URL
@@ -215,54 +206,59 @@ export const MealTracker = ({ addMeal }) => {
         .from(FOOD_BUCKET)
         .getPublicUrl(filePath);
 
-      publicUrl = publicData.publicUrl;
+      const imageUrl = publicData.publicUrl;
 
-      // 3) Token
-      const { data: { session } } = await supabase.auth.getSession();
+      // 3) Token Al
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
       if (!session?.access_token) {
-        throw new Error("Oturum bulunamadı.");
+        toast({
+          variant: 'destructive',
+          title: 'Yetki Hatası',
+          description: 'Oturum bulunamadı.',
+        });
+        setIsAnalyzing(false);
+        return;
       }
 
-      // 4) Edge Function Çağrısı (doğru invoke formatı)
+      // 4) Edge Function Çağır
       const { data, error } = await supabase.functions.invoke(
-        "analyze-food-image",
+        'analyze-food-image',
         {
-          body: { imageUrl: publicUrl },
+          body: { imageUrl },
           headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
+           Authorization: `Bearer ${session.access_token}`,
+           'Content-Type': 'application/json',
           },
+
+
         }
       );
 
-      // Edge Function Error Handling
       if (error) {
-        if (error instanceof FunctionsHttpError) {
-          const details = await error.context.json();
-          console.error("Function Error:", details);
-          throw new Error(details?.error || "AI işleme hatası.");
-        }
-        throw error;
+        console.error('EDGE ERROR:', error);
+        toast({
+          variant: 'destructive',
+          title: 'AI Hatası',
+          description: 'Analiz sırasında bir sorun oluştu.',
+        });
+        setIsAnalyzing(false);
+        return;
       }
 
       setAnalysisResult(data);
-
     } catch (err) {
-      console.error("ANALİZ HATASI:", err);
-
+      console.error(err);
       toast({
         variant: 'destructive',
-        title: 'Analiz Başarısız',
-        description: err.message || 'Bilinmeyen bir hata oluştu.',
+        title: 'Analiz Hatası',
+        description: 'İşlem başarısız.',
       });
-    } finally {
-      // Temizlik
-      if (filePath) {
-        await supabase.storage.from(FOOD_BUCKET).remove([filePath]);
-      }
-      setIsAnalyzing(false);
     }
+
+    setIsAnalyzing(false);
   };
 
   const handleConfirmMealFromAI = () => {
@@ -290,7 +286,8 @@ export const MealTracker = ({ addMeal }) => {
       description: `${meal.food_name} başarıyla kaydedildi.`,
     });
   };
-    // =====================================================
+
+  // =====================================================
   //                        UI
   // =====================================================
   const FoodIcon = ({ category }) => {
@@ -535,7 +532,9 @@ export const MealTracker = ({ addMeal }) => {
             {calculatedMacros && (
               <div className="p-3 bg-emerald-50 border rounded-lg text-sm">
                 <p className="font-semibold text-gray-800">Hesaplanan Değerler:</p>
-                <p>Kalori: <b>{calculatedMacros.calories} kcal</b></p>
+                <p>
+                  Kalori: <b>{calculatedMacros.calories} kcal</b>
+                </p>
                 <p>Protein: {calculatedMacros.protein} g</p>
                 <p>Karbonhidrat: {calculatedMacros.carbs} g</p>
                 <p>Yağ: {calculatedMacros.fat} g</p>
@@ -557,4 +556,6 @@ export const MealTracker = ({ addMeal }) => {
   );
 };
 
-export default MealTracker;
+// ======================================================================
+//                            END OF FILE
+// ======================================================================
