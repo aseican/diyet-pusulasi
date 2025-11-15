@@ -8,6 +8,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
+import { FunctionsHttpError } from '@supabase/supabase-js'; // Bu satırı dosyanın en üstündeki import bloklarına ekle!
 import { Search, Plus, Utensils, Drumstick, Apple, Coffee, Loader2, Zap, Camera } from 'lucide-react';
 import {
   Dialog,
@@ -164,133 +165,104 @@ export const MealTracker = ({ addMeal }) => {
     }
   };
 
-  const handleAnalyze = async () => {
+  // MealTracker.jsx dosyasındaki handleAnalyze fonksiyonunun TAMAMI
+
+const handleAnalyze = async () => {
     if (!aiFile || !user || isAnalyzing) return;
 
     setIsAnalyzing(true);
     setAnalysisResult(null);
 
+    // KOTA LİMİTLERİNİ ve KOTA AŞIM KONTROLÜNÜ ÇEKME
+    const quotaLimit = (() => {
+      switch (userData?.plan_tier) {
+        case 'basic': return 10; 
+        case 'pro': return 30;   
+        case 'kapsamli': return 50;
+        default: return 3; 
+      }
+    })();
+    const currentQuota = userData?.ai_usage_count || 0; 
+    const isQuotaReached = currentQuota >= quotaLimit;
+
     if (isQuotaReached) {
-      toast({
-        variant: 'destructive',
-        title: 'Limit Doldu',
-        description: `Günlük ${quotaLimit} analiz hakkınızı kullandınız.`,
-      });
+      toast({ variant: 'destructive', title: 'Limit Doldu', description: `Günlük ${quotaLimit} analiz hakkınızı kullandınız. Lütfen planınızı yükseltin.` });
       setIsAnalyzing(false);
       return;
     }
+    
+    let publicUrl = null;
+    let filePath = null;
 
     try {
-      // 1) Upload
-      const ext = aiFile.name.split('.').pop();
-      const fileName = `${uuidv4()}.${ext}`;
-      const filePath = `${user.id}/${fileName}`;
+        // 1) Upload (Benzersiz isim ile)
+        const ext = aiFile.name.split(".").pop();
+        const fileName = `${uuidv4()}.${ext}`;
+        filePath = `food-uploads/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from(FOOD_BUCKET)
-        .upload(filePath, aiFile);
+        const { error: uploadError } = await supabase.storage
+          .from(FOOD_BUCKET)
+          .upload(filePath, aiFile);
 
-      if (uploadError) {
-        console.error(uploadError);
-        toast({
-          variant: 'destructive',
-          title: 'Yükleme Hatası',
-          description: 'Fotoğraf yüklenemedi.',
-        });
-        setIsAnalyzing(false);
-        return;
-      }
+        if (uploadError) throw new Error("Fotoğraf yüklenemedi: " + uploadError.message);
 
-      // 2) Public URL
-      const { data: publicData } = supabase.storage
-        .from(FOOD_BUCKET)
-        .getPublicUrl(filePath);
+        // 2) Public URL'yi Al ve Token
+        const { data: publicData } = supabase.storage
+          .from(FOOD_BUCKET)
+          .getPublicUrl(filePath);
 
-      const imageUrl = publicData.publicUrl;
+        publicUrl = publicData.publicUrl;
 
-      // 3) Token Al
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (!session?.access_token) throw new Error("Oturum belirteci (token) eksik.");
 
-      if (!session?.access_token) {
-        toast({
-          variant: 'destructive',
-          title: 'Yetki Hatası',
-          description: 'Oturum bulunamadı.',
-        });
-        setIsAnalyzing(false);
-        return;
-      }
+        // 3) Edge Function Çağır (FIX: Tek Config Objesi Kullanıldı - 400 Hatasını Çözer)
+        const { data: analysisResult, error: functionError } = await supabase.functions.invoke(
+          "analyze-food-image",
+          { 
+            body: { imageUrl: publicUrl }, // Tek JSON gövdesi
+            headers: {
+              Authorization: `Bearer ${session.access_token}`, // Yetki Başlığı
+              "Content-Type": "application/json", // Payload'un JSON olduğunu belirtir
+            },
+          }
+        );
 
-      // MealTracker.jsx dosyasında handleAnalyze fonksiyonunun içini aç
-// ...
+        if (functionError) throw functionError;
+        
+        setAnalysisResult(analysisResult); 
 
-     // YALNIZCA BU BÖLÜMÜ DEĞİŞTİR:
-// MealTracker.jsx dosyasında handleAnalyze fonksiyonunun içindeki invoke çağrısını bununla değiştir:
-
-const { data, error } = await supabase.functions.invoke(
-  "analyze-food-image",
-  { // <-- TEK CONFIG OBJESİ BAŞLANGICI
-    body: { imageUrl },
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-      "Content-Type": "application/json",
-    },
-  } // <-- TEK CONFIG OBJESİ BİTİŞİ
-);
-
-// ... (Geri kalan kod aynı kalır)
-
-if (error) {
-  console.error('EDGE ERROR:', error);
-  toast({
-    variant: 'destructive',
-    title: 'AI Hatası',
-    description: 'Analiz sırasında bir sorun oluştu.',
-  });
-  setIsAnalyzing(false);
-  return;
-}
-
-setAnalysisResult(data);
     } catch (err) {
-      console.error(err);
-      toast({
-        variant: 'destructive',
-        title: 'Analiz Hatası',
-        description: 'İşlem başarısız.',
-      });
+        // Gelişmiş Hata Yönetimi
+        let description = 'İşlem sırasında beklenmedik bir sorun oluştu.';
+
+        if (err instanceof FunctionsHttpError) {
+            const responseData = await err.context.json();
+            description = responseData?.error || responseData?.message || description; // Edge Function'dan gelen özel hatayı göster
+        } else if (err.message.includes("token eksik")) {
+             description = "Oturum süresi doldu. Lütfen tekrar giriş yapın.";
+        } else if (err.message.includes("Dosya yüklenemedi")) {
+             description = err.message;
+        }
+
+        console.error('ANALİZ HATASI:', err);
+        toast({
+            variant: 'destructive',
+            title: 'Analiz Başarısız',
+            description,
+        });
+
+    } finally {
+        // 4) Storage'dan Resmi Sil (Hata oluşsa bile)
+        if (filePath) {
+            await supabase.storage.from(FOOD_BUCKET).remove([filePath]);
+        }
+        setIsAnalyzing(false);
     }
+};
 
-    setIsAnalyzing(false);
-  };
-
-  const handleConfirmMealFromAI = () => {
-    if (!analysisResult) return;
-
-    const meal = {
-      meal_type: mealType,
-      food_name: analysisResult.name,
-      calories: analysisResult.calories,
-      protein: analysisResult.protein,
-      carbs: analysisResult.carbs,
-      fat: analysisResult.fat,
-      quantity: analysisResult.quantity,
-      unit: analysisResult.unit,
-      user_id: user.id,
-      date: new Date().toISOString().split('T')[0],
-    };
-
-    addMeal(meal);
-    setAnalysisResult(null);
-    setAiFile(null);
-
-    toast({
-      title: 'Öğün Eklendi',
-      description: `${meal.food_name} başarıyla kaydedildi.`,
-    });
-  };
+// ... [handleConfirmMealFromAI fonksiyonu ve diğerleri aşağıda devam eder]
 
   // =====================================================
   //                        UI
