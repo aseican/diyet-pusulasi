@@ -229,10 +229,11 @@ export const MealTracker = ({ addMeal }) => {
         {
           body: { imageUrl },
           headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-            'Content-Type': 'application/json',
+           Authorization: `Bearer ${session.access_token}`,
+           'Content-Type': 'application/json',
           },
+
+
         }
       );
 
