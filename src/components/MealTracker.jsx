@@ -223,32 +223,35 @@ export const MealTracker = ({ addMeal }) => {
         return;
       }
 
-      // 4) Edge Function Çağır
+      // MealTracker.jsx dosyasında handleAnalyze fonksiyonunun içini aç
+// ...
+
+      // 4) Edge Function Çağır (Bu kısmı değiştiriyoruz)
       const { data, error } = await supabase.functions.invoke(
-        'analyze-food-image',
-        {
+        "analyze-food-image",
+        { // <-- İKİNCİ ARGÜMAN ARTIK TEK BİR AYAR OBJESİDİR
           body: { imageUrl },
           headers: {
-           Authorization: `Bearer ${session.access_token}`,
-           'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
           },
-
-
-        }
+        } // <-- TEK OBJE BİTTİ
       );
 
-      if (error) {
-        console.error('EDGE ERROR:', error);
-        toast({
-          variant: 'destructive',
-          title: 'AI Hatası',
-          description: 'Analiz sırasında bir sorun oluştu.',
-        });
-        setIsAnalyzing(false);
-        return;
-      }
+// ... (Geri kalan kod aynı kalır)
 
-      setAnalysisResult(data);
+if (error) {
+  console.error('EDGE ERROR:', error);
+  toast({
+    variant: 'destructive',
+    title: 'AI Hatası',
+    description: 'Analiz sırasında bir sorun oluştu.',
+  });
+  setIsAnalyzing(false);
+  return;
+}
+
+setAnalysisResult(data);
     } catch (err) {
       console.error(err);
       toast({
