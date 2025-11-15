@@ -27,7 +27,7 @@ Deno.serve(async (req) => {
   // Initialize Supabase client
   const supabase = createClient(
     Deno.env.get("PROJECT_URL"),
-    Deno.env.get("SERVICE_ROLE_SECRET")
+    Deno.env.get("SECRET_KEY")
   );
 
   // Auth token

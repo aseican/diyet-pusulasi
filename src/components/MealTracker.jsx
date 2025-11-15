@@ -226,17 +226,19 @@ export const MealTracker = ({ addMeal }) => {
       // MealTracker.jsx dosyasında handleAnalyze fonksiyonunun içini aç
 // ...
 
-      // 4) Edge Function Çağır (Bu kısmı değiştiriyoruz)
-      const { data, error } = await supabase.functions.invoke(
-        "analyze-food-image",
-        { // <-- İKİNCİ ARGÜMAN ARTIK TEK BİR AYAR OBJESİDİR
-          body: { imageUrl },
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-        } // <-- TEK OBJE BİTTİ
-      );
+     // YALNIZCA BU BÖLÜMÜ DEĞİŞTİR:
+// MealTracker.jsx dosyasında handleAnalyze fonksiyonunun içindeki invoke çağrısını bununla değiştir:
+
+const { data, error } = await supabase.functions.invoke(
+  "analyze-food-image",
+  { // <-- TEK CONFIG OBJESİ BAŞLANGICI
+    body: { imageUrl },
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      "Content-Type": "application/json",
+    },
+  } // <-- TEK CONFIG OBJESİ BİTİŞİ
+);
 
 // ... (Geri kalan kod aynı kalır)
 
