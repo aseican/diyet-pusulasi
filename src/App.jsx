@@ -6,7 +6,9 @@ import { useToast } from '@/components/ui/use-toast';
 import { calculateCalorieTarget } from '@/lib/calculator';
 
 // YENİ IMPORT: WebView'dan gelen mesajları dinlemek için
-import { WebView } from 'react-native-webview'; // React Native WebView kütüphanesini kullanıyorsanız
+// Vercel build'ini geçmek için Vite.config.js'de dışladık, ancak
+// bu satır tarayıcıda çalışırken hala hata verebilir.
+import { WebView } from 'react-native-webview'; 
 
 // YENİ IMPORT: Satın alma mantığı
 import { handlePurchase } from '@/lib/BillingIntegration'; 
@@ -30,35 +32,39 @@ export function App() {
   const [meals, setMeals] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   
-  // YENİ REF: WebView komponentine erişmek için
-  const webViewRef = useRef(null); 
+  // 🛑 ÇÖZÜM İÇİN YENİ: Tarayıcıda çalışıyorsa WebView'u simüle eden boş bir bileşen kullan.
+  // Bu, React Native Web/Browser ortamında çökmeyi engeller.
+  const SafeWebView = (typeof document !== 'undefined' || !WebView) ? ({ children }) => <div style={{flex: 1, minHeight: 600, padding: 20}}>Tarayıcı Önizlemesinde Görüntülenemiyor. Lütfen Mobil Uygulamayı Kullanın.</div> : WebView;
   
-  // YENİ SABİT: Web sitesinin ana URL'si
-  const BASE_WEB_URL = 'https://diyettakip.org'; // 🟢 Düzeltildi: Tek sayfa sitenizin URL'si
-  
-  // YENİ FONKSİYON: Supabase oturum token'ını alır.
-  const getSupabaseSessionToken = React.useCallback(async () => {
-    if (!user) return null;
-    // Oturum token'ını çek
-    const { data } = await supabase.auth.getSession();
-    return data.session?.access_token || null;
-  }, [user]);
+  // YENİ REF: WebView komponentine erişmek için
+  const webViewRef = useRef(null); 
+  
+  // YENİ SABİT: Web sitesinin ana URL'si
+  const BASE_WEB_URL = 'https://diyettakip.org'; 
+  
+  // YENİ FONKSİYON: Supabase oturum token'ını alır.
+  const getSupabaseSessionToken = React.useCallback(async () => {
+    if (!user) return null;
+    // Oturum token'ını çek
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token || null;
+  }, [user]);
 
-  // YENİ FONKSİYON: WebView'dan gelen mesajları işler
-  const onWebViewMessage = React.useCallback(async (event) => {
-      // event.nativeEvent.data bir JSON dizesidir.
-      const data = JSON.parse(event.nativeEvent.data);
+  // YENİ FONKSİYON: WebView'dan gelen mesajları işler
+  const onWebViewMessage = React.useCallback(async (event) => {
+      // event.nativeEvent.data bir JSON dizesidir.
+      const data = JSON.parse(event.nativeEvent.data);
 
-      if (data.type === 'START_PURCHASE') {
-          console.log("WebView'dan ödeme isteği alındı:", data.productId);
-          
-          // 🛑 DÜZELTME: Token'ı al ve handlePurchase'a gönder
-          const token = await getSupabaseSessionToken();
-          await handlePurchase(data.productId, webViewRef, updateUserData, toast, token);
-      }
-      
-  }, [updateUserData, toast, getSupabaseSessionToken]); // Bağımlılığa ekle
-  // ===============================================
+      if (data.type === 'START_PURCHASE') {
+          console.log("WebView'dan ödeme isteği alındı:", data.productId);
+          
+          // 🛑 DÜZELTME: Token'ı al ve handlePurchase'a gönder
+          const token = await getSupabaseSessionToken();
+          await handlePurchase(data.productId, webViewRef, updateUserData, toast, token);
+      }
+      
+  }, [updateUserData, toast, getSupabaseSessionToken]); 
+  // ===============================================
 
   // === FETCH USER DATA (Tek Satır Sorgu) ===
   const fetchUserData = React.useCallback(async () => {
@@ -272,21 +278,32 @@ export function App() {
       case 'profile':
         return <Profile userData={userData} updateUserData={updateUserData} />;
       case 'premium': 
-        // PremiumUyelik bir web içeriği olduğu için WebView içinde render edilmelidir.
-        // WebView'un postMessage ile iletişim kurmasını sağlamalıyız.
-          const webUrl = BASE_WEB_URL; // 🟢 Düzeltildi: Tek sayfa site olduğu için BASE URL kullanılır
+        // PREMIUM EKRANI İÇİN KOŞULLU RENDER KULLANILIR
           
+          // 1. Web sitesinin ana URL'si
+          const webUrl = BASE_WEB_URL; 
+          
+          // 2. Sadece Native (React Native) ortamında WebView'ı render et. 
+          // (typeof document === 'undefined') koşulu, tarayıcıda olmadığımızı belirtir.
+          if (typeof document !== 'undefined') {
+              // Tarayıcı/Web ortamı: Çökmeyi önlemek için basit bir mesaj döndür
+              return (
+                  <div style={{ flex: 1, padding: 20, textAlign: 'center', backgroundColor: '#f0f0f0' }}>
+                      <p style={{ marginTop: 50, fontWeight: 'bold' }}>Bu görünüm sadece mobil uygulama içinde aktiftir.</p>
+                      <p>WebView bileşeni tarayıcıda kullanılamaz.</p>
+                  </div>
+              );
+          }
+          
+          // 3. Native ortamı: WebView'u render et
           return (
-             // WebView, useRef ve onMessage'ı kullanarak PremiumUyelik içeriğini sarar.
              <WebView
                 ref={webViewRef}
                 source={{ uri: webUrl }}
-                onMessage={onWebViewMessage} // Burası WebView'dan gelen mesajları dinler
+                onMessage={onWebViewMessage} 
                 javaScriptEnabled={true}
-                // Tek sayfa sitelerde WebView'a, hangi içeriğin görüntüleneceğini 
-                // bildirmek için JavaScript enjekte etmemiz gerekir.
                 injectedJavaScript={`window.activeTab = 'premium'; true;`}
-                style={{ flex: 1, minHeight: 600 }} // Ekranı kaplaması için stil
+                style={{ flex: 1, minHeight: 600 }}
              />
           ); 
       default:
@@ -302,8 +319,8 @@ export function App() {
       <div className="mobile-container">
         <Header userData={userData} />
         <main className="pb-20 pt-16 flex-1 overflow-auto">
-             {renderContent()}
-         </main>
+             {renderContent()}
+         </main>
         <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
       </div>
     </>
