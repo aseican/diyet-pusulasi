@@ -2,7 +2,7 @@
 //                        FULL & WORKING MealTracker.jsx
 // ======================================================================
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Input } from '@/components/ui/input';
@@ -43,16 +43,9 @@ export const MealTracker = ({ addMeal }) => {
   const [quantity, setQuantity] = useState(100);
   const [unit, setUnit] = useState('gram');
   const [mealType, setMealType] = useState('Kahvaltı');
-const fileInputRef = useRef(null);
 
-const removePhoto = () => {
-  setAiFile(null);
-
-  if (fileInputRef.current) {
-    fileInputRef.current.value = "";
-  }
-};
-
+  // AI FOTOĞRAF STATE
+  const fileInputRef = useRef(null);
   const [aiFile, setAiFile] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -173,6 +166,15 @@ const removePhoto = () => {
     }
   };
 
+  const removePhoto = () => {
+    setAiFile(null);
+    setAnalysisResult(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const handleAnalyze = async () => {
     if (!aiFile || !user || isAnalyzing) return;
 
@@ -212,17 +214,22 @@ const removePhoto = () => {
 
       // 2) Public URL
       const { data: publicData } = supabase
-  .storage
-  .from(FOOD_BUCKET)
-  .getPublicUrl(filePath);
+        .storage
+        .from(FOOD_BUCKET)
+        .getPublicUrl(filePath);
 
-const imageUrl = publicData?.publicUrl;
+      const imageUrl = publicData?.publicUrl;
 
-if (!imageUrl) {
-  console.error("PUBLIC URL OLUŞMADI!", publicData);
-  return;
-}
-
+      if (!imageUrl) {
+        console.error("PUBLIC URL OLUŞMADI!", publicData);
+        toast({
+          variant: 'destructive',
+          title: 'URL Hatası',
+          description: 'Fotoğraf için public URL oluşturulamadı.',
+        });
+        setIsAnalyzing(false);
+        return;
+      }
 
       // 3) Token Al
       const {
@@ -241,15 +248,14 @@ if (!imageUrl) {
 
       // 4) Edge Function Çağır
       const { data, error } = await supabase.functions.invoke(
-  "analyze-food-image",
-  {
-    body: { imageUrl },   // JSON.stringify YOK
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-    },
-  }
-);
-
+        "analyze-food-image",
+        {
+          body: { imageUrl },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }
+      );
 
       if (error) {
         console.error('EDGE ERROR:', error);
@@ -448,72 +454,70 @@ if (!imageUrl) {
             </div>
           ) : (
             <div className="space-y-3">
+              {/* GİZLİ INPUT */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                id="upload-ai"
+                className="hidden"
+                onChange={handleFileChange}
+              />
 
-  {/* GİZLİ INPUT */}
-  <input
-    ref={fileInputRef}
-    type="file"
-    accept="image/*"
-    id="upload-ai"
-    className="hidden"
-    onChange={handleFileChange}
-  />
+              {/* FOTOĞRAF YÜKLEME BUTONU */}
+              {!aiFile && (
+                <Label
+                  htmlFor="upload-ai"
+                  className="cursor-pointer flex flex-col items-center justify-center p-8 border-2 border-emerald-300 border-dashed rounded-lg hover:bg-emerald-50"
+                >
+                  <Camera className="h-8 w-8 text-emerald-500" />
+                  <p className="mt-2 font-medium text-emerald-700">Yemek Fotoğrafı Yükle</p>
+                </Label>
+              )}
 
-  {/* FOTOĞRAF YÜKLEME BUTONU */}
-  {!aiFile && (
-    <Label
-      htmlFor="upload-ai"
-      className="cursor-pointer flex flex-col items-center justify-center p-8 border-2 border-emerald-300 border-dashed rounded-lg hover:bg-emerald-50"
-    >
-      <Camera className="h-8 w-8 text-emerald-500" />
-      <p className="mt-2 font-medium text-emerald-700">Yemek Fotoğrafı Yükle</p>
-    </Label>
-  )}
+              {/* FOTOĞRAF SEÇİLDİYSE ÖN İZLEME + KALDIRMA */}
+              {aiFile && (
+                <div className="flex flex-col items-center gap-3 p-4 border rounded-lg bg-gray-50">
+                  <p className="font-medium text-gray-800 text-sm">{aiFile.name}</p>
 
-  {/* FOTOĞRAF SEÇİLDİYSE ÖN İZLEME + KALDIRMA */}
-  {aiFile && (
-    <div className="flex flex-col items-center gap-3 p-4 border rounded-lg bg-gray-50">
-      <p className="font-medium text-gray-800 text-sm">{aiFile.name}</p>
+                  <div className="flex gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="border-blue-500 text-blue-600 hover:bg-blue-50"
+                    >
+                      Değiştir
+                    </Button>
 
-      <div className="flex gap-3">
-        <Button
-          variant="outline"
-          onClick={() => fileInputRef.current?.click()}
-          className="border-blue-500 text-blue-600 hover:bg-blue-50"
-        >
-          Değiştir
-        </Button>
+                    <Button
+                      variant="outline"
+                      onClick={removePhoto}
+                      className="border-red-500 text-red-600 hover:bg-red-50"
+                    >
+                      Kaldır
+                    </Button>
+                  </div>
+                </div>
+              )}
 
-        <Button
-          variant="outline"
-          onClick={removePhoto}
-          className="border-red-500 text-red-600 hover:bg-red-50"
-        >
-          Kaldır
-        </Button>
-      </div>
-    </div>
-  )}
-
-  {/* ANALİZ BUTONU */}
-  <Button
-    onClick={handleAnalyze}
-    disabled={!aiFile || isAnalyzing}
-    className="w-full bg-emerald-600 hover:bg-emerald-700"
-  >
-    {isAnalyzing ? (
-      <>
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-        Analiz Ediliyor...
-      </>
-    ) : (
-      <>
-        <Zap className="mr-2 h-4 w-4" /> Yemeği Analiz Et
-      </>
-    )}
-  </Button>
-</div>
-
+              {/* ANALİZ BUTONU */}
+              <Button
+                onClick={handleAnalyze}
+                disabled={!aiFile || isAnalyzing}
+                className="w-full bg-emerald-600 hover:bg-emerald-700"
+              >
+                {isAnalyzing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Analiz Ediliyor...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="mr-2 h-4 w-4" /> Yemeği Analiz Et
+                  </>
+                )}
+              </Button>
+            </div>
           )}
 
           <p className="text-xs text-center text-gray-500">
@@ -576,7 +580,7 @@ if (!imageUrl) {
             {calculatedMacros && (
               <div className="p-3 bg-emerald-50 border rounded-lg text-sm">
                 <p className="font-semibold text-gray-800">Hesaplanan Değerler:</p>
-                <p>
+                <p className="font-medium">
                   Kalori: <b>{calculatedMacros.calories} kcal</b>
                 </p>
                 <p>Protein: {calculatedMacros.protein} g</p>
