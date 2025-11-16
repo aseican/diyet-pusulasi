@@ -57,7 +57,7 @@ const productIdMap = {
   kapsamli: 'sub_unlimited_monthly',
 };
 
-// ⭐ SATIN ALMA – WEB / APK YÖNLENDİRME DESTEKLİ
+// ⭐ SATIN ALMA – DÜZELTİLMİŞ SÜRÜM
 const handleSubscription = (tier) => {
   const productId = productIdMap[tier];
 
@@ -73,27 +73,27 @@ const handleSubscription = (tier) => {
 
   console.log("Satın alma isteği gönderildi:", payload);
 
-  // 1️⃣ React Native WebView (Android & iOS)
-  if (window.ReactNativeWebView?.postMessage) {
-    window.ReactNativeWebView.postMessage(JSON.stringify(payload));
-    return;
-  }
-
-  // 2️⃣ Android Native interface (bazı özel webview türleri)
+  // 1️⃣ Android Native WebView (ÖNCE)
   if (window.AndroidBilling?.startPurchase) {
+    console.log("AndroidBilling startPurchase tetiklendi");
     window.AndroidBilling.startPurchase(productId);
     return;
   }
 
-  // 3️⃣ WEB → APK yönlendirme
+  // 2️⃣ React Native WebView (Sonra)
+  if (window.ReactNativeWebView?.postMessage) {
+    console.log("ReactNativeWebView postMessage tetiklendi");
+    window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+    return;
+  }
+
+  // 3️⃣ Normal WEB – APK yönlendirme
   alert("Satın alma işlemi sadece mobil uygulamada yapılabilir.");
-  window.location.href = "https://diyettakip.org/app.apk"; // ← APK linkin buraya
+  window.location.href = "https://diyettakip.org/app.apk";
 };
 
-// ⭐ COMPONENT
 export const PremiumUyelik = () => {
   const { userData } = useAuth();
-
   const currentPlan = userData?.plan_tier || 'free';
 
   return (
@@ -142,10 +142,7 @@ export const PremiumUyelik = () => {
                   Mevcut Planınız
                 </Button>
               ) : (
-                <Button
-                  className="w-full"
-                  onClick={() => handleSubscription(tierData.tier)}
-                >
+                <Button className="w-full" onClick={() => handleSubscription(tierData.tier)}>
                   {tierData.buttonText}
                 </Button>
               )}
