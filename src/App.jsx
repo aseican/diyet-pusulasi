@@ -1,14 +1,13 @@
-import React, { useRef } from 'react'; // useRef eklendi
+import React, { useRef } from 'react';
 import { Helmet } from 'react-helmet';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
 import { calculateCalorieTarget } from '@/lib/calculator';
 
-// YENİ IMPORT: WebView'dan gelen mesajları dinlemek için
-// Vercel build'ini geçmek için Vite.config.js'de dışladık, ancak
-// bu satır tarayıcıda çalışırken hala hata verebilir.
-import { WebView } from 'react-native-webview'; 
+// 🛑 KRİTİK DÜZELTME 1: Native kütüphaneyi burada import etmiyoruz.
+// Bu satırı siliyoruz:
+// import { WebView } from 'react-native-webview'; 
 
 // YENİ IMPORT: Satın alma mantığı
 import { handlePurchase } from '@/lib/BillingIntegration'; 
@@ -24,6 +23,21 @@ import AuthScreen from '@/components/AuthScreen';
 import { PremiumUyelik } from '@/components/PremiumUyelik'; 
 
 
+// 🟢 WebView'ı sadece Native Ortamda (APK) yüklemek için geçici bir değişken tanımlayalım.
+let WebViewComponent;
+try {
+  // Eğer Native ortamda çalışıyorsa, require başarılı olur.
+  WebViewComponent = require('react-native-webview').WebView;
+} catch (e) {
+  // Eğer Web ortamında çalışıyorsa, require başarısız olur ve biz WebView'ı bir mock ile değiştiririz.
+  WebViewComponent = (props) => (
+    <div {...props} style={{...props.style, backgroundColor: '#f0f0f0', border: '2px solid #ccc', textAlign: 'center', paddingTop: 50}}>
+      <p style={{ fontWeight: 'bold' }}>Bu içerik sadece Native (APK) ortamında görüntülenebilir.</p>
+    </div>
+  );
+}
+
+
 export function App() {
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
@@ -31,10 +45,6 @@ export function App() {
   const [userData, setUserData] = React.useState(null); 
   const [meals, setMeals] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
-  
-  // 🛑 ÇÖZÜM İÇİN YENİ: Tarayıcıda çalışıyorsa WebView'u simüle eden boş bir bileşen kullan.
-  // Bu, React Native Web/Browser ortamında çökmeyi engeller.
-  const SafeWebView = (typeof document !== 'undefined' || !WebView) ? ({ children }) => <div style={{flex: 1, minHeight: 600, padding: 20}}>Tarayıcı Önizlemesinde Görüntülenemiyor. Lütfen Mobil Uygulamayı Kullanın.</div> : WebView;
   
   // YENİ REF: WebView komponentine erişmek için
   const webViewRef = useRef(null); 
@@ -68,6 +78,7 @@ export function App() {
 
   // === FETCH USER DATA (Tek Satır Sorgu) ===
   const fetchUserData = React.useCallback(async () => {
+// ... (fetchUserData fonksiyonunun geri kalanı)
     if (!user) return;
 
     const { data, error } = await supabase
@@ -90,7 +101,7 @@ export function App() {
   // ===========================================
 
   const fetchMeals = React.useCallback(async () => {
-// ... (fetchMeals fonksiyonunun geri kalanı aynı)
+// ... (fetchMeals fonksiyonunun geri kalanı)
     if (!user) return;
     const { data, error } = await supabase
       .from('added_meals')
@@ -111,6 +122,7 @@ export function App() {
   }, [user, toast]);
 
   React.useEffect(() => {
+// ... (useEffect mantığı aynı kalır)
     const fetchData = async () => {
       if (user) {
         setLoading(true);
@@ -127,7 +139,7 @@ export function App() {
 
   // === MANTIK FIX 1: PROFIL GUNCELLEME (KALORI VE SU EKLEME HATASINI ÇÖZER) ===
   const updateUserData = React.useCallback(
-// ... (updateUserData fonksiyonunun geri kalanı aynı)
+// ... (updateUserData mantığı aynı kalır)
     async (newData) => {
       if (!user) return;
 
@@ -164,7 +176,7 @@ export function App() {
 
   // === MANTIK FIX 2: ONBOARDING TAMAMLAMA (BAŞLANGIÇ KİLOSU VE KALORİ HESAPLAMA) ===
   const handleOnboardingComplete = async (formData) => {
-// ... (handleOnboardingComplete fonksiyonunun geri kalanı aynı)
+// ... (handleOnboardingComplete mantığı aynı kalır)
     if (!user) return;
     
     // 1. Hesaplamalar
@@ -197,7 +209,7 @@ export function App() {
   };
 
   const addMeal = async (mealData) => {
-// ... (addMeal fonksiyonunun geri kalanı aynı)
+// ... (addMeal mantığı aynı kalır)
     if (!user) return;
     const mealWithUser = { ...mealData, user_id: user.id };
     const { error } = await supabase.from('added_meals').insert([mealWithUser]);
@@ -215,7 +227,7 @@ export function App() {
   };
 
   const deleteMeal = async (mealId) => {
-// ... (deleteMeal fonksiyonunun geri kalanı aynı)
+// ... (deleteMeal mantığı aynı kalır)
     if (!user) return;
     const { error } = await supabase
       .from('added_meals')
@@ -236,6 +248,7 @@ export function App() {
   };
 
   if (authLoading || (user && loading)) {
+// ... (Yüklenme ekranı mantığı aynı kalır)
     return (
       <div className="mobile-container flex items-center justify-center min-h-screen bg-gray-50">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600"></div>
@@ -248,6 +261,7 @@ export function App() {
   }
 
   if (!userData) {
+// ... (Onboarding mantığı aynı kalır)
     return (
       <>
         <Helmet>
@@ -263,6 +277,7 @@ export function App() {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
+// ... (dashboard mantığı aynı kalır)
         return (
           <Dashboard
             userData={userData}
@@ -278,26 +293,23 @@ export function App() {
       case 'profile':
         return <Profile userData={userData} updateUserData={updateUserData} />;
       case 'premium': 
-        // PREMIUM EKRANI İÇİN KOŞULLU RENDER KULLANILIR
           
           // 1. Web sitesinin ana URL'si
           const webUrl = BASE_WEB_URL; 
           
-          // 2. Sadece Native (React Native) ortamında WebView'ı render et. 
-          // (typeof document === 'undefined') koşulu, tarayıcıda olmadığımızı belirtir.
-          if (typeof document !== 'undefined') {
-              // Tarayıcı/Web ortamı: Çökmeyi önlemek için basit bir mesaj döndür
+          // 2. Tarayıcıda çalışıyorsa (document tanımlıysa), Mock bileşeni göster
+          if (typeof document !== 'undefined' && !WebViewComponent.isWebView) {
               return (
-                  <div style={{ flex: 1, padding: 20, textAlign: 'center', backgroundColor: '#f0f0f0' }}>
+                  <WebViewComponent style={{ flex: 1 }}>
                       <p style={{ marginTop: 50, fontWeight: 'bold' }}>Bu görünüm sadece mobil uygulama içinde aktiftir.</p>
                       <p>WebView bileşeni tarayıcıda kullanılamaz.</p>
-                  </div>
+                  </WebViewComponent>
               );
           }
           
           // 3. Native ortamı: WebView'u render et
           return (
-             <WebView
+             <WebViewComponent
                 ref={webViewRef}
                 source={{ uri: webUrl }}
                 onMessage={onWebViewMessage} 
