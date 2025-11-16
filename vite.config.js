@@ -180,7 +180,6 @@ const addTransformIndexHtml = {
                 tag: 'script',
                 attrs: { type: 'module' },
                 children: configHorizonsViteErrorHandler,
-                injectTo: 'head',
             },
             {
                 tag: 'script',
@@ -264,9 +263,9 @@ export default defineConfig({
                 '@babel/traverse',
                 '@babel/generator',
                 '@babel/types',
-                // 🟢 YENİ EKLENEN NATIVE MODÜLLER:
-                'react-native-webview',
-                'react-native-iap',
+                // 🟢 Vercel'deki import hatalarını çözmek için eklenenler
+                'react-native-webview',
+                'react-native-iap',
             ]
         }
     }
