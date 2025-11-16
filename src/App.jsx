@@ -6,7 +6,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { calculateCalorieTarget } from '@/lib/calculator';
 
 // YENİ IMPORT: WebView'dan gelen mesajları dinlemek için
-import { WebView } from 'react-native-webview';
+import { WebView } from 'react-native-webview'; // React Native WebView kütüphanesini kullanıyorsanız
 
 // YENİ IMPORT: Satın alma mantığı
 import { handlePurchase } from '@/lib/BillingIntegration'; 
@@ -34,22 +34,30 @@ export function App() {
   const webViewRef = useRef(null); 
   
   // YENİ SABİT: Web sitesinin ana URL'si
-  const BASE_WEB_URL = 'https://diyettakip.org'; // ❗ Kendi sitenizin URL'si
+  const BASE_WEB_URL = 'https://diyettakip.org'; // 🟢 Düzeltildi: Tek sayfa sitenizin URL'si
   
+  // YENİ FONKSİYON: Supabase oturum token'ını alır.
+  const getSupabaseSessionToken = React.useCallback(async () => {
+    if (!user) return null;
+    // Oturum token'ını çek
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token || null;
+  }, [user]);
+
   // YENİ FONKSİYON: WebView'dan gelen mesajları işler
   const onWebViewMessage = React.useCallback(async (event) => {
       // event.nativeEvent.data bir JSON dizesidir.
       const data = JSON.parse(event.nativeEvent.data);
 
       if (data.type === 'START_PURCHASE') {
-          // PremiumUyelik.jsx'ten gelen ödeme isteğini yakala
           console.log("WebView'dan ödeme isteği alındı:", data.productId);
           
-          // Satın alma akışını başlat ve Supabase doğrulamasına gönder
-          await handlePurchase(data.productId, webViewRef, updateUserData, toast);
+          // 🛑 DÜZELTME: Token'ı al ve handlePurchase'a gönder
+          const token = await getSupabaseSessionToken();
+          await handlePurchase(data.productId, webViewRef, updateUserData, toast, token);
       }
       
-  }, [updateUserData, toast]);
+  }, [updateUserData, toast, getSupabaseSessionToken]); // Bağımlılığa ekle
   // ===============================================
 
   // === FETCH USER DATA (Tek Satır Sorgu) ===
@@ -76,6 +84,7 @@ export function App() {
   // ===========================================
 
   const fetchMeals = React.useCallback(async () => {
+// ... (fetchMeals fonksiyonunun geri kalanı aynı)
     if (!user) return;
     const { data, error } = await supabase
       .from('added_meals')
@@ -112,6 +121,7 @@ export function App() {
 
   // === MANTIK FIX 1: PROFIL GUNCELLEME (KALORI VE SU EKLEME HATASINI ÇÖZER) ===
   const updateUserData = React.useCallback(
+// ... (updateUserData fonksiyonunun geri kalanı aynı)
     async (newData) => {
       if (!user) return;
 
@@ -148,6 +158,7 @@ export function App() {
 
   // === MANTIK FIX 2: ONBOARDING TAMAMLAMA (BAŞLANGIÇ KİLOSU VE KALORİ HESAPLAMA) ===
   const handleOnboardingComplete = async (formData) => {
+// ... (handleOnboardingComplete fonksiyonunun geri kalanı aynı)
     if (!user) return;
     
     // 1. Hesaplamalar
@@ -180,6 +191,7 @@ export function App() {
   };
 
   const addMeal = async (mealData) => {
+// ... (addMeal fonksiyonunun geri kalanı aynı)
     if (!user) return;
     const mealWithUser = { ...mealData, user_id: user.id };
     const { error } = await supabase.from('added_meals').insert([mealWithUser]);
@@ -197,6 +209,7 @@ export function App() {
   };
 
   const deleteMeal = async (mealId) => {
+// ... (deleteMeal fonksiyonunun geri kalanı aynı)
     if (!user) return;
     const { error } = await supabase
       .from('added_meals')
@@ -220,7 +233,7 @@ export function App() {
     return (
       <div className="mobile-container flex items-center justify-center min-h-screen bg-gray-50">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600"></div>
-      </div>
+        </div>
     );
   }
 
@@ -261,7 +274,7 @@ export function App() {
       case 'premium': 
         // PremiumUyelik bir web içeriği olduğu için WebView içinde render edilmelidir.
         // WebView'un postMessage ile iletişim kurmasını sağlamalıyız.
-          const webUrl = BASE_WEB_URL; // Tek sayfa site olduğu için BASE URL kullanılır
+          const webUrl = BASE_WEB_URL; // 🟢 Düzeltildi: Tek sayfa site olduğu için BASE URL kullanılır
           
           return (
              // WebView, useRef ve onMessage'ı kullanarak PremiumUyelik içeriğini sarar.
