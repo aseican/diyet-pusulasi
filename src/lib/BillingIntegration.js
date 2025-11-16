@@ -1,13 +1,20 @@
 import * as RNIap from 'react-native-iap';
 import { supabase } from '@/lib/customSupabaseClient'; // App.jsx'ten gelen supabase client
-import { getSupabaseSessionToken } from '@/contexts/SupabaseAuthContext'; // Oturum token'ını çeker
 
 // Lütfen bu URL'yi kendi Supabase Edge Function URL'inizle değiştirin!
-// Örn: https://<PROJE_ID>.supabase.co/functions/v1/analyze-food-image/verify-purchase
+// Edge Function adınız "analyze-food-image" olduğu varsayılır.
+// customSupabaseClient'taki SUPABASE_URL'i temel alır.
 const SUPABASE_VERIFY_URL = `${supabase.functionsUrl}/v1/analyze-food-image/verify-purchase`;
 
-// Bu, PremiumUyelik.jsx'ten gelen mesajı işleyen ana fonksiyondur.
-export const handlePurchase = async (productId, webViewRef, updateUserData, toast) => {
+/**
+ * Play Billing akışını başlatır ve başarılı olursa token'ı sunucuya gönderir.
+ * @param {string} productId - Google Play Console'daki ürün SKU'su (premium_basic_monthly, vb.)
+ * @param {object} webViewRef - WebView bileşenine referans (geri bildirim için)
+ * @param {function} updateUserData - App.jsx'teki kullanıcı verilerini güncelleyen fonksiyon
+ * @param {function} toast - Uygulama içi bildirim fonksiyonu
+ * @param {string} token - Supabase oturum token'ı (App.jsx'ten alınmıştır)
+ */
+export const handlePurchase = async (productId, webViewRef, updateUserData, toast, token) => {
     try {
         toast({ title: "Ödeme Başlatılıyor", description: "Google Play penceresi açılıyor...", duration: 2000 });
 
@@ -16,17 +23,18 @@ export const handlePurchase = async (productId, webViewRef, updateUserData, toas
         const product = products[0];
 
         if (!product) {
-            throw new Error(`Ürün ID'si bulunamadı: ${productId}`);
+            throw new Error(`Ürün ID'si bulunamadı: ${productId}. Play Console'da aktif mi?`);
         }
 
         // 2. Satın alma akışını başlat
         const purchase = await RNIap.requestPurchase({ 
             sku: productId, 
-            andDangerouslyFinishTransactionAutomatically: false // Satın almayı kendimiz onaylayacağız
+            // Satın almayı kendimiz onaylayacağız (finishTransaction)
+            andDangerouslyFinishTransactionAutomatically: false 
         });
 
         // 3. Satın Alma Başarılı! Sunucu doğrulamasına git.
-        await verifyPurchaseOnServer(purchase, webViewRef, updateUserData, toast);
+        await verifyPurchaseOnServer(purchase, webViewRef, updateUserData, toast, token);
 
     } catch (error) {
         console.error('❌ Satın Alma Akışı Hatası:', error);
@@ -43,8 +51,10 @@ export const handlePurchase = async (productId, webViewRef, updateUserData, toas
     }
 };
 
-// Satın Alma Token'ını Supabase Edge Function'a gönderir
-const verifyPurchaseOnServer = async (purchase, webViewRef, updateUserData, toast) => {
+/**
+ * Satın alma token'ını Supabase Edge Function'a göndererek doğrular.
+ */
+const verifyPurchaseOnServer = async (purchase, webViewRef, updateUserData, toast, token) => {
     const androidPurchase = purchase.transactionReceipt ? purchase : purchase.android[0]; // iOS/Android ayrımı
     
     // Gerekli verileri çıkarın
@@ -52,11 +62,11 @@ const verifyPurchaseOnServer = async (purchase, webViewRef, updateUserData, toas
         purchaseToken: androidPurchase.purchaseToken,
         productId: androidPurchase.productId,
         // Uygulamanızın paket adı (Play Console'dan alın)
-        packageName: "com.diyetpusulasi.diyetpusulasi", // BURAYI DEĞİŞTİRİN
+        packageName: "com.example.yourapppackage", // BURAYI KESİNLİKLE KENDİ PAKET ADINIZLA DEĞİŞTİRİN
     };
 
     try {
-        const token = await getSupabaseSessionToken();
+        // Token'ı doğrudan kullan
         if (!token) throw new Error("Kullanıcı oturumu bulunamadı.");
 
         // Edge Function'ı çağır
@@ -76,7 +86,6 @@ const verifyPurchaseOnServer = async (purchase, webViewRef, updateUserData, toas
             await RNIap.finishTransaction({ purchase: androidPurchase, isConsumable: false });
             
             // 2. React Native State'ini Güncelle (Supabase'ten çekilen veriyi yeniler)
-            // Bu, App.jsx'teki fetchUserData fonksiyonunu tetikleyebilir.
             updateUserData({ plan_tier: data.plan_tier }); 
 
             // 3. WebView'a başarılı geri bildirim gönder
