@@ -12,8 +12,7 @@ const QUOTA_LIMITS = {
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, content-type, apikey, x-client-info",
+  "Access-Control-Allow-Headers": "authorization, content-type, apikey, x-client-info",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
@@ -22,19 +21,17 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  // Supabase client
+  // Init Supabase (Service Role Key ile)
   const supabase = createClient(
     Deno.env.get("PROJECT_URL"),
     Deno.env.get("SECRET_KEY")
   );
 
-  // AUTH
+  // Auth & Token Alımı
   const authHeader = req.headers.get("Authorization") || "";
   const token = authHeader.replace("Bearer ", "");
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser(token);
+  const { data: { user } } = await supabase.auth.getUser(token);
 
   if (!user) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -43,7 +40,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Profile
+  // Profil Yükleme (Kota için)
   const { data: profile } = await supabase
     .from("profiles")
     .select("plan_tier, ai_usage_count, ai_usage_last_reset")
@@ -56,32 +53,20 @@ Deno.serve(async (req) => {
     ai_usage_last_reset: null,
   };
 
-  // Daily quota
   const today = new Date().toISOString().split("T")[0];
-  const lastReset =
-    safeProfile.ai_usage_last_reset?.split("T")[0] ?? null;
+  const lastReset = safeProfile.ai_usage_last_reset?.split("T")[0] ?? null;
 
   const usage = lastReset === today ? safeProfile.ai_usage_count : 0;
 
-  if (usage >= QUOTA_LIMITS[safeProfile.plan_tier]) {
+  if (usage >= QUOTA_LIMITS[safeProfile.plan_tier ?? "free"]) {
     return new Response(JSON.stringify({ error: "Quota exceeded" }), {
       status: 429,
       headers: corsHeaders,
     });
   }
 
-  await supabase
-    .from("profiles")
-    .update({
-      ai_usage_count: usage + 1,
-      ai_usage_last_reset: today,
-    })
-    .eq("id", user.id);
-
-  // ⭐ BODY BURADA OKUNUYOR — DOĞRUSU BU ⭐
+  // Payload Okuma
   const body = await req.json().catch(() => null);
-
-  console.log("RAW BODY => ", body);
 
   if (!body || !body.imageUrl) {
     return new Response(JSON.stringify({ error: "Missing imageUrl" }), {
@@ -92,51 +77,70 @@ Deno.serve(async (req) => {
 
   const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
-  // ⭐ OPENAI ANALİZ İSTEĞİ ⭐
-  const aiRes = await fetch(OPENAI_API_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: "Bu fotoğrafı analiz et ve JSON formatında besin bilgisi döndür.",
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: body.imageUrl,
-                detail: "low",
-              },
-            },
-          ],
+  // === KRİTİK İŞLEM BAŞLANGICI ===
+  try {
+    // KULLANIMI ARTTIR (Önce artırıyoruz, hata olursa geri alırız)
+    await supabase
+        .from("profiles")
+        .update({
+            ai_usage_count: usage + 1,
+            ai_usage_last_reset: today,
+        })
+        .eq("id", user.id);
+
+
+    // OPENAI İSTEĞİ
+    const aiRes = await fetch(OPENAI_API_URL, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
         },
-      ],
-    }),
-  });
+        body: JSON.stringify({
+            model: "gpt-4o-mini",
+            response_format: { type: "json_object" },
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: "Bu fotoğrafı analiz et ve sadece JSON formatında besin bilgisi döndür. Anahtar kelimeler: name, calories, protein, carbs, fat, quantity, unit. Türkçe kullan." },
+                        { type: "image_url", image_url: { url: body.imageUrl, detail: "low" } },
+                    ],
+                },
+            ],
+        }),
+    });
 
-  const result = await aiRes.json();
+    const result = await aiRes.json();
 
-  console.log("OPENAI RAW RESPONSE:", result);
+    if (!aiRes.ok || !result?.choices?.[0]?.message?.content) {
+        // Hata durumunda kotayı geri al
+        await supabase.from("profiles").update({ ai_usage_count: usage }).eq("id", user.id);
 
-  if (!result?.choices?.[0]?.message?.content) {
-    return new Response(
-      JSON.stringify({ error: "AI response error", details: result }),
-      { status: 500, headers: corsHeaders }
-    );
+        return new Response(
+            JSON.stringify({ error: "OpenAI API failed.", details: result }),
+            { status: 500, headers: corsHeaders }
+        );
+    }
+
+    // JSON AYRIŞTIRMA (Parser hatası verirse yakala)
+    const parsed = JSON.parse(result.choices[0].message.content.trim());
+
+    // Başarılı Cevap
+    return new Response(JSON.stringify(parsed), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+
+  } catch (err) {
+    // SUNUCU ÇÖKMESİNDE VEYA JSON PARSE HATASINDA KOTAYI GERİ AL
+    await supabase.from("profiles").update({ ai_usage_count: usage }).eq("id", user.id);
+
+    console.error("❌ FINAL CRASH ERROR:", err.message);
+    
+    // Hata mesajını kullanıcıya temiz bir şekilde gönder
+    return new Response(JSON.stringify({ error: "Analiz sırasında sunucuya ulaşılamadı. (Lütfen OpenAI faturanızı kontrol edin.)" }), {
+      status: 500,
+      headers: corsHeaders,
+    });
   }
-
-  const parsed = JSON.parse(result.choices[0].message.content);
-
-  return new Response(JSON.stringify(parsed), {
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
 });

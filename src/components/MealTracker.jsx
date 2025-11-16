@@ -43,6 +43,15 @@ export const MealTracker = ({ addMeal }) => {
   const [quantity, setQuantity] = useState(100);
   const [unit, setUnit] = useState('gram');
   const [mealType, setMealType] = useState('Kahvaltı');
+const fileInputRef = useRef(null);
+
+const removePhoto = () => {
+  setAiFile(null);
+
+  if (fileInputRef.current) {
+    fileInputRef.current.value = "";
+  }
+};
 
   const [aiFile, setAiFile] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -439,42 +448,72 @@ if (!imageUrl) {
             </div>
           ) : (
             <div className="space-y-3">
-              <input
-                type="file"
-                accept="image/*"
-                id="upload-ai"
-                className="hidden"
-                onChange={handleFileChange}
-              />
 
-              <Label
-                htmlFor="upload-ai"
-                className="cursor-pointer flex flex-col items-center justify-center p-8 border-2 border-emerald-300 border-dashed rounded-lg hover:bg-emerald-50"
-              >
-                <Camera className="h-8 w-8 text-emerald-500" />
-                <p className="mt-2 font-medium text-emerald-700">Yemek Fotoğrafı Yükle</p>
-                {aiFile && (
-                  <p className="text-sm text-gray-800 mt-2">{aiFile.name}</p>
-                )}
-              </Label>
+  {/* GİZLİ INPUT */}
+  <input
+    ref={fileInputRef}
+    type="file"
+    accept="image/*"
+    id="upload-ai"
+    className="hidden"
+    onChange={handleFileChange}
+  />
 
-              <Button
-                onClick={handleAnalyze}
-                disabled={!aiFile || isAnalyzing}
-                className="w-full bg-emerald-600 hover:bg-emerald-700"
-              >
-                {isAnalyzing ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Analiz Ediliyor...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="mr-2 h-4 w-4" /> Yemeği Analiz Et
-                  </>
-                )}
-              </Button>
-            </div>
+  {/* FOTOĞRAF YÜKLEME BUTONU */}
+  {!aiFile && (
+    <Label
+      htmlFor="upload-ai"
+      className="cursor-pointer flex flex-col items-center justify-center p-8 border-2 border-emerald-300 border-dashed rounded-lg hover:bg-emerald-50"
+    >
+      <Camera className="h-8 w-8 text-emerald-500" />
+      <p className="mt-2 font-medium text-emerald-700">Yemek Fotoğrafı Yükle</p>
+    </Label>
+  )}
+
+  {/* FOTOĞRAF SEÇİLDİYSE ÖN İZLEME + KALDIRMA */}
+  {aiFile && (
+    <div className="flex flex-col items-center gap-3 p-4 border rounded-lg bg-gray-50">
+      <p className="font-medium text-gray-800 text-sm">{aiFile.name}</p>
+
+      <div className="flex gap-3">
+        <Button
+          variant="outline"
+          onClick={() => fileInputRef.current?.click()}
+          className="border-blue-500 text-blue-600 hover:bg-blue-50"
+        >
+          Değiştir
+        </Button>
+
+        <Button
+          variant="outline"
+          onClick={removePhoto}
+          className="border-red-500 text-red-600 hover:bg-red-50"
+        >
+          Kaldır
+        </Button>
+      </div>
+    </div>
+  )}
+
+  {/* ANALİZ BUTONU */}
+  <Button
+    onClick={handleAnalyze}
+    disabled={!aiFile || isAnalyzing}
+    className="w-full bg-emerald-600 hover:bg-emerald-700"
+  >
+    {isAnalyzing ? (
+      <>
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        Analiz Ediliyor...
+      </>
+    ) : (
+      <>
+        <Zap className="mr-2 h-4 w-4" /> Yemeği Analiz Et
+      </>
+    )}
+  </Button>
+</div>
+
           )}
 
           <p className="text-xs text-center text-gray-500">
