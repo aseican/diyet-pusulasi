@@ -7,7 +7,6 @@ const Header = ({ userData, setUserData }) => {
   if (!userData) return null;
 
   const handleLogout = () => {
-    // Kullanıcı verilerini sıfırla → onboarding'e döner
     localStorage.clear();
     setUserData(null);
   };
@@ -17,7 +16,9 @@ const Header = ({ userData, setUserData }) => {
       initial={{ y: -100 }}
       animate={{ y: 0 }}
       transition={{ type: 'spring', stiffness: 120, damping: 20 }}
-      className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-sm shadow-sm"
+
+      // ⬇️ SORUNU ÇÖZEN YER ⬇️
+      className="sticky top-0 z-40 bg-white/90 backdrop-blur-sm shadow-sm"
     >
       <div className="max-w-md mx-auto">
         <div className="flex items-center justify-between p-4">
