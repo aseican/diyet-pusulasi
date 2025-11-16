@@ -293,17 +293,26 @@ export function App() {
       case 'profile':
         return <Profile userData={userData} updateUserData={updateUserData} />;
       case 'premium':
-        // Native ortamda gerçek WebView, web'de mock devreye giriyor
-        return (
-          <WebViewComponent
-            ref={webViewRef}
-            source={{ uri: BASE_WEB_URL }}
-            onMessage={onWebViewMessage}
-            javaScriptEnabled={true}
-            injectedJavaScript={`window.activeTab = 'premium'; true;`}
-            style={{ flex: 1, minHeight: 600 }}
-          />
-        );
+  // Web'de normal premium sayfası göster
+  if (typeof window !== 'undefined') {
+    return <PremiumUyelik onPurchaseClick={() => {
+      window.alert("Premium satın alma işlemi sadece mobil uygulamada yapılabilir!");
+      window.location.href = "https://siten.com/app-download"; // ← APK indirme linki
+    }} />;
+  }
+
+  // Native ortam: WebView üzerinden ödeme
+  return (
+    <WebViewComponent
+      ref={webViewRef}
+      source={{ uri: BASE_WEB_URL }}
+      onMessage={onWebViewMessage}
+      javaScriptEnabled={true}
+      injectedJavaScript={`window.activeTab = 'premium'; true;`}
+      style={{ flex: 1, minHeight: 600 }}
+    />
+  );
+
       default:
         return (
           <Dashboard

@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Check, X } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 
-// ⭐ PLAN OPTIONS (Senin istediğin gibi güncellendi)
+// ⭐ PLAN OPTIONS
 const pricingTiers = [
   {
     tier: 'pro',
@@ -50,14 +50,14 @@ const pricingTiers = [
   },
 ];
 
-// ⭐ GOOGLE PLAY ÜRÜN ID EŞLEMESİ
+// ⭐ GOOGLE PLAY ÜRÜN ID’LERİ
 const productIdMap = {
   pro: 'sub_pro_monthly',
   premium: 'sub_premium_monthly',
   kapsamli: 'sub_unlimited_monthly',
 };
 
-// ⭐ SATIN ALMA KOMUTU (WebView → Native)
+// ⭐ SATIN ALMA – WEB / APK YÖNLENDİRME DESTEKLİ
 const handleSubscription = (tier) => {
   const productId = productIdMap[tier];
 
@@ -73,21 +73,21 @@ const handleSubscription = (tier) => {
 
   console.log("Satın alma isteği gönderildi:", payload);
 
-  // React Native WebView
-  if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+  // 1️⃣ React Native WebView (Android & iOS)
+  if (window.ReactNativeWebView?.postMessage) {
     window.ReactNativeWebView.postMessage(JSON.stringify(payload));
-    alert("Satın alma işlemi başlatılıyor (React Native)...");
     return;
   }
 
-  // Android Native WebView
-  if (window.AndroidBilling && window.AndroidBilling.startPurchase) {
+  // 2️⃣ Android Native interface (bazı özel webview türleri)
+  if (window.AndroidBilling?.startPurchase) {
     window.AndroidBilling.startPurchase(productId);
-    alert("Satın alma işlemi başlatılıyor (Android Native)...");
     return;
   }
 
-  alert("Ödeme sadece mobil uygulamada yapılabilir.");
+  // 3️⃣ WEB → APK yönlendirme
+  alert("Satın alma işlemi sadece mobil uygulamada yapılabilir.");
+  window.location.href = "https://diyettakip.org/app.apk"; // ← APK linkin buraya
 };
 
 // ⭐ COMPONENT
