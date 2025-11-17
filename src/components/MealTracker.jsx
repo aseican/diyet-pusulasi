@@ -43,8 +43,8 @@ export const MealTracker = ({ addMeal }) => {
     kapsamli: { daily: 35 },
   };
   const userPlanForUi = userData?.plan_tier || 'free';
-  const quotaLimit = planLimitsForUi[userPlanForUi]?.daily ?? 0;
-  const currentQuota = userData?.ai_daily_used ?? 0;
+  const quotaLimit = Number(planLimitsForUi[userPlanForUi]?.daily ?? 0);
+  const currentQuota = Number(userData?.ai_daily_used ?? 0);
   const isQuotaReached = currentQuota >= quotaLimit;
 
   // STATE'LER
