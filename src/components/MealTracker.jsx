@@ -102,23 +102,38 @@ export const MealTracker = ({ addMeal }) => {
   // =====================================================
   //                MANUEL YEMEK EKLEME
   // =====================================================
-  const getMultiplier = (unit, food) => {
-    const servingSize = food.gram || 100;
+  const getMultiplier = (unit, quantity, food) => {
+  let totalGram = 0;
 
-    switch (unit) {
-      case 'gram':
-        return quantity / 100;
-      case 'adet':
-      case 'porsiyon':
-        return (quantity * servingSize) / 100;
-      case 'bardak':
-        return (quantity * 200) / 100;
-      case 'kasik':
-        return (quantity * 15) / 100;
-      default:
-        return quantity / 100;
-    }
-  };
+  switch (unit) {
+    case 'gram':
+      totalGram = quantity;
+      break;
+
+    case 'adet':
+      totalGram = quantity * (food.unit_gram || 100);
+      break;
+
+    case 'porsiyon':
+      totalGram = quantity * (food.portion_gram || 200);
+      break;
+
+    case 'bardak':
+      totalGram = quantity * 200;
+      break;
+
+    case 'kasik':
+      totalGram = quantity * 15;
+      break;
+
+    default:
+      totalGram = quantity;
+  }
+
+  // ürün 100 gramlık değer içeriyor → multiplier hesaplıyoruz
+  return totalGram / 100;
+};
+
 
   const handleAddMeal = () => {
     if (!selectedFood || !quantity || quantity <= 0) {
