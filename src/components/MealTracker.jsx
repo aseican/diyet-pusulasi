@@ -35,6 +35,18 @@ export const MealTracker = ({ addMeal }) => {
   const { toast } = useToast();
   const { user, userData } = useAuth();
 
+  // AI kota UI hesapları (sadece görsel gösterim için)
+  const planLimitsForUi = {
+    free: { daily: 0 },
+    basic: { daily: 10 },
+    pro: { daily: 20 },
+    kapsamli: { daily: 35 },
+  };
+  const userPlanForUi = userData?.plan_tier || 'free';
+  const quotaLimit = planLimitsForUi[userPlanForUi]?.daily ?? 0;
+  const currentQuota = userData?.ai_daily_used ?? 0;
+  const isQuotaReached = currentQuota >= quotaLimit;
+
   // STATE'LER
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -175,6 +187,36 @@ async function checkAndUpdateQuota(supabase, userId) {
       quota: { dailyUsed, limits },
     };
   }
+
+
+//-----------------------------------------------------
+// AI kullanım hakkını 1 arttır (günlük + aylık)
+//-----------------------------------------------------
+async function incrementAiUsage(supabase, userId) {
+  const { data: user, error } = await supabase
+    .from("profiles")
+    .select("ai_daily_used, ai_monthly_used")
+    .eq("id", userId)
+    .single();
+
+  if (error || !user) return;
+
+  const today = new Date().toISOString().split("T")[0];
+  const month = new Date().toISOString().slice(0, 7);
+
+  const daily = (user.ai_daily_used ?? 0) + 1;
+  const monthly = (user.ai_monthly_used ?? 0) + 1;
+
+  await supabase
+    .from("profiles")
+    .update({
+      ai_daily_used: daily,
+      ai_monthly_used: monthly,
+      ai_last_use_date: today,
+      ai_last_use_month: month,
+    })
+    .eq("id", userId);
+}
 
   if (monthlyUsed >= limits.monthly) {
     return {
