@@ -76,7 +76,7 @@ export const MealTracker = ({ addMeal }) => {
 
     const { data, error } = await supabase
       .from('foods')
-      .select('id, name_tr, calories, protein, carbs, fat, gram, category')
+      .select('id, name_tr, calories, protein, carbs, fat, unit_gram, category')
       .ilike('name_tr', `%${searchTerm}%`)
       .limit(50);
 
