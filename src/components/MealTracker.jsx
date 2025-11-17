@@ -324,17 +324,18 @@ async function incrementAiUsage(supabase, userId) {
     const multiplier = getMultiplier(unit, selectedFood);
 
     const meal = {
-      meal_type: mealType,
-      food_name: selectedFood.name_tr,
-      calories: Math.round(selectedFood.calories * multiplier),
-      protein: parseFloat((selectedFood.protein * multiplier).toFixed(1)),
-      carbs: parseFloat((selectedFood.carbs * multiplier).toFixed(1)),
-      fat: parseFloat((selectedFood.fat * multiplier).toFixed(1)),
-      quantity,
-      unit,
-      user_id: user.id,
-      date: new Date().toISOString().split('T')[0],
-    };
+  meal_type: mealType,
+  food_name: analysisResult?.name || "Bilinmeyen",
+  calories: Number(analysisResult?.calories ?? 0),
+  protein: Number(analysisResult?.protein ?? 0),
+  carbs: Number(analysisResult?.carbs ?? 0),
+  fat: Number(analysisResult?.fat ?? 0),
+  quantity: Number(analysisResult?.quantity ?? 1),
+  unit: analysisResult?.unit || "adet",
+  user_id: user.id,
+  date: new Date().toISOString().split('T')[0],
+};
+
 
     addMeal(meal);
     setSelectedFood(null);
