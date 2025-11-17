@@ -50,18 +50,151 @@ export const MealTracker = ({ addMeal }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
 
-  // KOTA
-  const quotaLimit =
-    userData?.plan_tier === 'basic'
-      ? 10
-      : userData?.plan_tier === 'pro'
-      ? 30
-      : userData?.plan_tier === 'kapsamli'
-      ? 50
-      : 3;
+  //---------------------------------------------
+// PLAN LİMİTLERİ
+//---------------------------------------------
+const PLAN_LIMITS = {
+  free: { daily: 3, monthly: 3 },
+  basic: { daily: 10, monthly: 30 },
+  pro: { daily: 20, monthly: 60 },
+  kapsamli: { daily: 35, monthly: 1000 },
+};
 
-  const currentQuota = userData?.ai_usage_count || 0;
-  const isQuotaReached = currentQuota >= quotaLimit;
+//---------------------------------------------
+// GÜNLÜK / AYLIK RESET KONTROLÜ
+//---------------------------------------------
+function resetIfNeeded(user) {
+  const now = new Date();
+  const lastDaily = user.last_daily_reset ? new Date(user.last_daily_reset) : null;
+  const lastMonthly = user.last_monthly_reset ? new Date(user.last_monthly_reset) : null;
+
+  let needsDailyReset = false;
+  let needsMonthlyReset = false;
+
+  // Günlük reset (tarih değiştiyse)
+  if (!lastDaily || lastDaily.toDateString() !== now.toDateString()) {
+    needsDailyReset = true;
+  }
+
+  // Aylık reset (ay değiştiyse)
+  if (!lastMonthly || lastMonthly.getMonth() !== now.getMonth()) {
+    needsMonthlyReset = true;
+  }
+
+  return { needsDailyReset, needsMonthlyReset };
+}
+
+//---------------------------------------------
+// KULLANICI KOTA VERİSİ HAZIRLAMA
+//---------------------------------------------
+function getQuotaData(user) {
+  const plan = user.plan_tier || "free";
+  const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
+
+  const dailyUsed = user.ai_usage_daily || 0;
+  const monthlyUsed = user.ai_usage_monthly || 0;
+
+  return {
+    limits,
+    dailyUsed,
+    monthlyUsed,
+    dailyRemaining: limits.daily - dailyUsed,
+    monthlyRemaining: limits.monthly - monthlyUsed,
+    isDailyExceeded: dailyUsed >= limits.daily,
+    isMonthlyExceeded: monthlyUsed >= limits.monthly,
+  };
+}
+
+//---------------------------------------------
+// API → KOTA KONTROL + RESET
+//---------------------------------------------
+// =====================================================
+// KOTA KONTROLÜ — Senin kolonlarına tam uyumlu
+// =====================================================
+async function checkAndUpdateQuota(supabase, userId) {
+  // Kullanıcıyı çek
+  const { data: user, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .single();
+
+  if (error || !user)
+    return { allowed: false, reason: "USER_NOT_FOUND" };
+
+  // Bugünün tarihi
+  const today = new Date().toISOString().split("T")[0];
+  const month = new Date().toISOString().slice(0, 7);
+
+  let dailyUsed = user.ai_daily_used || 0;
+  let monthlyUsed = user.ai_monthly_used || 0;
+
+  // PLAN LİMİTLERİ
+  const planLimits = {
+    free: { daily: 0, monthly: 3 },
+    basic: { daily: 10, monthly: 30 },
+    pro: { daily: 20, monthly: 60 },
+    kapsamli: { daily: 35, monthly: 1000 },
+  };
+
+  const limits = planLimits[user.plan_tier] || planLimits.free;
+
+  // ==========================
+  //   GÜNLÜK SIFIRLAMA
+  // ==========================
+  if (user.ai_last_use_date !== today) {
+    dailyUsed = 0;
+    await supabase
+      .from("profiles")
+      .update({
+        ai_daily_used: 0,
+        ai_last_use_date: today,
+      })
+      .eq("id", userId);
+  }
+
+  // ==========================
+  //   AYLIK SIFIRLAMA
+  // ==========================
+  if (user.ai_last_use_month !== month) {
+    monthlyUsed = 0;
+    await supabase
+      .from("profiles")
+      .update({
+        ai_monthly_used: 0,
+        ai_last_use_month: month,
+      })
+      .eq("id", userId);
+  }
+
+  // Sınırları tekrar hesapla
+  if (dailyUsed >= limits.daily) {
+    return {
+      allowed: false,
+      reason: "DAILY_LIMIT_REACHED",
+      quota: { dailyUsed, limits },
+    };
+  }
+
+  if (monthlyUsed >= limits.monthly) {
+    return {
+      allowed: false,
+      reason: "MONTHLY_LIMIT_REACHED",
+      quota: { monthlyUsed, limits },
+    };
+  }
+
+  return {
+    allowed: true,
+    quota: {
+      dailyUsed,
+      monthlyUsed,
+      limits,
+    },
+    user,
+  };
+}
+
 
   // =====================================================
   //                     SEARCH FOODS
@@ -190,111 +323,81 @@ export const MealTracker = ({ addMeal }) => {
     }
   };
 
-  const handleAnalyze = async () => {
-    if (!aiFile || !user || isAnalyzing) return;
+const handleAnalyze = async () => {
+  if (!aiFile || !user || isAnalyzing) return;
 
-    setIsAnalyzing(true);
-    setAnalysisResult(null);
+  setIsAnalyzing(true);
+  setAnalysisResult(null);
 
-    if (isQuotaReached) {
-      toast({
-        variant: 'destructive',
-        title: 'Limit Doldu',
-        description: `Günlük ${quotaLimit} analiz hakkınızı kullandınız.`,
-      });
-      setIsAnalyzing(false);
-      return;
-    }
+  // === 1) KOTA KONTROLÜ ===
+  const quota = await checkAndUpdateQuota(supabase, user.id);
 
-    try {
-      // 1) Upload
-      const ext = aiFile.name.split('.').pop();
-      const fileName = `${uuidv4()}.${ext}`;
-      const filePath = `${user.id}/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from(FOOD_BUCKET)
-        .upload(filePath, aiFile);
-
-      if (uploadError) {
-        console.error(uploadError);
-        toast({
-          variant: 'destructive',
-          title: 'Yükleme Hatası',
-          description: 'Fotoğraf yüklenemedi.',
-        });
-        setIsAnalyzing(false);
-        return;
-      }
-
-      // 2) Public URL
-      const { data: publicData } = supabase
-        .storage
-        .from(FOOD_BUCKET)
-        .getPublicUrl(filePath);
-
-      const imageUrl = publicData?.publicUrl;
-
-      if (!imageUrl) {
-        console.error("PUBLIC URL OLUŞMADI!", publicData);
-        toast({
-          variant: 'destructive',
-          title: 'URL Hatası',
-          description: 'Fotoğraf için public URL oluşturulamadı.',
-        });
-        setIsAnalyzing(false);
-        return;
-      }
-
-      // 3) Token Al
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) {
-        toast({
-          variant: 'destructive',
-          title: 'Yetki Hatası',
-          description: 'Oturum bulunamadı.',
-        });
-        setIsAnalyzing(false);
-        return;
-      }
-
-      // 4) Edge Function Çağır
-      const { data, error } = await supabase.functions.invoke(
-        "analyze-food-image",
-        {
-          body: { imageUrl },
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        }
-      );
-
-      if (error) {
-        console.error('EDGE ERROR:', error);
-        toast({
-          variant: 'destructive',
-          title: 'AI Hatası',
-          description: 'Analiz sırasında bir sorun oluştu.',
-        });
-        setIsAnalyzing(false);
-        return;
-      }
-
-      setAnalysisResult(data);
-    } catch (err) {
-      console.error(err);
-      toast({
-        variant: 'destructive',
-        title: 'Analiz Hatası',
-        description: 'İşlem başarısız.',
-      });
-    }
-
+  if (!quota.allowed) {
+    toast({
+      variant: "destructive",
+      title: "Limit Doldu",
+      description:
+        quota.reason === "DAILY_LIMIT_REACHED"
+          ? "Günlük AI kullanım hakkınız doldu."
+          : "Aylık AI kullanım hakkınız doldu.",
+    });
     setIsAnalyzing(false);
-  };
+    return;
+  }
+
+  try {
+    // === 2) Fotoğraf yükleme ===
+    const ext = aiFile.name.split(".").pop();
+    const fileName = `${uuidv4()}.${ext}`;
+    const filePath = `${user.id}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(FOOD_BUCKET)
+      .upload(filePath, aiFile);
+
+    if (uploadError) throw uploadError;
+
+    // === 3) Public URL ===
+    const { data: publicData } = supabase.storage
+      .from(FOOD_BUCKET)
+      .getPublicUrl(filePath);
+
+    const imageUrl = publicData?.publicUrl;
+    if (!imageUrl) throw new Error("PUBLIC_URL_FAIL");
+
+    // === 4) Session ===
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error("NO_SESSION");
+
+    // === 5) AI ANALİZ ===
+    const { data, error } = await supabase.functions.invoke(
+      "analyze-food-image",
+      {
+        body: { imageUrl },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      }
+    );
+
+    if (error) throw error;
+
+    setAnalysisResult(data);
+
+    // === 6) KULLANIM HAKKINI DÜŞÜR ===
+    await incrementAiUsage(supabase, user.id);
+
+  } catch (err) {
+    console.error(err);
+    toast({
+      variant: "destructive",
+      title: "Analiz Hatası",
+      description: "Analiz yapılamadı.",
+    });
+  }
+
+  setIsAnalyzing(false);
+};
+
+
 
   const handleConfirmMealFromAI = () => {
     if (!analysisResult) return;

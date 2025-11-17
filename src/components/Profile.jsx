@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { User, Edit2, Save, Star, Wind, Snowflake, Flame } from 'lucide-react';
@@ -90,6 +89,7 @@ const Profile = ({ userData, updateUserData }) => {
   
   return (
     <div className="px-6 py-6 space-y-6">
+
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-gray-800">Profilim</h2>
         <Button
@@ -110,11 +110,42 @@ const Profile = ({ userData, updateUserData }) => {
         </Button>
       </div>
 
+      {/* === PREMIUM BADGE BURAYA EKLENDİ === */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-6 text-white shadow-xl"
+        className="relative bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-6 text-white shadow-xl"
       >
+        {userData?.plan_tier !== "free" && (
+          <div className="
+            absolute top-4 right-4 
+            px-3 py-1 rounded-full
+            text-xs font-bold
+            flex items-center gap-1
+            backdrop-blur-md bg-white/20 shadow-lg
+            border border-white/30
+          ">
+            {userData.plan_tier === "basic" && (
+              <>
+                <Star className="w-4 h-4 text-blue-300" />
+                <span className="text-blue-100">Basic</span>
+              </>
+            )}
+            {userData.plan_tier === "pro" && (
+              <>
+                <Star className="w-4 h-4 text-purple-300" />
+                <span className="text-purple-100">Pro</span>
+              </>
+            )}
+            {userData.plan_tier === "kapsamli" && (
+              <>
+                <Star className="w-4 h-4 text-yellow-300" />
+                <span className="text-yellow-100">Kapsamlı</span>
+              </>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center gap-4 mb-4">
           <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center">
             <User className="w-10 h-10" />
@@ -123,11 +154,12 @@ const Profile = ({ userData, updateUserData }) => {
             <h3 className="text-2xl font-bold">{userData?.username || 'Kullanıcı'}</h3>
           </div>
         </div>
+
         <div className="grid grid-cols-2 gap-4 mt-6">
           <div className="bg-white/10 rounded-xl p-3">
             <p className="text-emerald-100 text-xs mb-1">VKİ</p>
             <p className="text-2xl font-bold">{bmi}</p>
-            <p className={`text-xs mt-1 font-bold ${bmiCategory.color.replace('text-', 'text-emerald-')}`}>{bmiCategory.text}</p>
+            <p className={`text-xs mt-1 font-bold ${bmiCategory.color}`}>{bmiCategory.text}</p>
           </div>
           <div className="bg-white/10 rounded-xl p-3">
             <p className="text-emerald-100 text-xs mb-1">Hedef</p>
@@ -137,6 +169,7 @@ const Profile = ({ userData, updateUserData }) => {
         </div>
       </motion.div>
 
+      {/* --- ALT PROFİL BİLGİLERİ (DOKUNULMADI) --- */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -155,29 +188,66 @@ const Profile = ({ userData, updateUserData }) => {
               className="mt-1"
             />
           </div>
-           <div className="grid grid-cols-2 gap-4">
+          
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <Label>Cinsiyet</Label>
-              <RadioGroup name="gender" value={formData.gender} onValueChange={(v) => setFormData({...formData, gender: v})} className="flex gap-4 mt-2" disabled={!isEditing}>
-                  <Label htmlFor="female_prof" className="flex items-center gap-2 cursor-pointer"><RadioGroupItem value="female" id="female_prof" /> Kadın</Label>
-                  <Label htmlFor="male_prof" className="flex items-center gap-2 cursor-pointer"><RadioGroupItem value="male" id="male_prof" /> Erkek</Label>
+              <RadioGroup
+                name="gender"
+                value={formData.gender}
+                onValueChange={(v) => setFormData({ ...formData, gender: v })}
+                className="flex gap-4 mt-2"
+                disabled={!isEditing}
+              >
+                <Label htmlFor="female_prof" className="flex items-center gap-2 cursor-pointer">
+                  <RadioGroupItem value="female" id="female_prof" /> Kadın
+                </Label>
+                <Label htmlFor="male_prof" className="flex items-center gap-2 cursor-pointer">
+                  <RadioGroupItem value="male" id="male_prof" /> Erkek
+                </Label>
               </RadioGroup>
             </div>
+
             <div>
               <Label htmlFor="age">Yaş</Label>
-              <Input id="age" type="number" value={formData.age} onChange={(e) => setFormData({ ...formData, age: e.target.value })} disabled={!isEditing} className="mt-1"/>
+              <Input
+                id="age"
+                type="number"
+                value={formData.age}
+                onChange={(e) => setFormData({ ...formData, age: e.target.value })}
+                disabled={!isEditing}
+                className="mt-1"
+              />
             </div>
           </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="height">Boy (cm)</Label>
-              <Input id="height" type="number" value={formData.height} onChange={(e) => setFormData({ ...formData, height: e.target.value })} disabled={!isEditing} className="mt-1"/>
+              <Input
+                id="height"
+                type="number"
+                value={formData.height}
+                onChange={(e) => setFormData({ ...formData, height: e.target.value })}
+                disabled={!isEditing}
+                className="mt-1"
+              />
             </div>
+
             <div>
-               <Label htmlFor="weight">Mevcut Kilo (kg)</Label>
-              <Input id="weight" type="number" step="0.1" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value })} disabled={!isEditing} className="mt-1"/>
+              <Label htmlFor="weight">Mevcut Kilo (kg)</Label>
+              <Input
+                id="weight"
+                type="number"
+                step="0.1"
+                value={formData.weight}
+                onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
+                disabled={!isEditing}
+                className="mt-1"
+              />
             </div>
           </div>
+
         </div>
       </motion.div>
 
@@ -188,26 +258,69 @@ const Profile = ({ userData, updateUserData }) => {
         className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100"
       >
         <h3 className="font-semibold text-gray-800 mb-4">Hedefler ve Yaşam Tarzı</h3>
-         <div className="space-y-4">
-            <div>
-              <Label htmlFor="target_weight">Hedef Kilo (kg)</Label>
-              <Input id="target_weight" type="number" step="0.1" value={formData.target_weight} onChange={(e) => setFormData({ ...formData, target_weight: e.target.value })} disabled={!isEditing} className="mt-1"/>
-            </div>
-            <div>
-                <Label>Aktivite Seviyesi</Label>
-                <RadioGroup name="activity_level" value={formData.activity_level} onValueChange={(v) => setFormData({...formData, activity_level: v})} className="space-y-2 mt-2" disabled={!isEditing}>
-                    <Label htmlFor="p-sedentary" className="flex items-center p-2 border rounded-lg cursor-pointer text-sm"><RadioGroupItem value="sedentary" id="p-sedentary" className="mr-2"/> <Snowflake className="w-5 h-5 mr-2"/> Hareketsiz</Label>
-                    <Label htmlFor="p-light" className="flex items-center p-2 border rounded-lg cursor-pointer text-sm"><RadioGroupItem value="light" id="p-light" className="mr-2"/> <Wind className="w-5 h-5 mr-2"/> Hafif Aktif</Label>
-                    <Label htmlFor="p-moderate" className="flex items-center p-2 border rounded-lg cursor-pointer text-sm"><RadioGroupItem value="moderate" id="p-moderate" className="mr-2"/> <Flame className="w-5 h-5 mr-2"/> Orta Aktif</Label>
-                    <Label htmlFor="p-active" className="flex items-center p-2 border rounded-lg cursor-pointer text-sm"><RadioGroupItem value="active" id="p-active" className="mr-2"/> <Star className="w-5 h-5 mr-2"/> Çok Aktif</Label>
-                </RadioGroup>
-                <p className="text-xs text-gray-500 mt-2">Kalori hedefiniz aktivite seviyenize göre otomatik hesaplanır. Manuel olarak değiştirmek için aşağıdaki alanı kullanın.</p>
-            </div>
-            <div>
-                <Label htmlFor="target_calories">Günlük Kalori Hedefi (kcal)</Label>
-                <Input id="target_calories" type="number" value={formData.target_calories} onChange={(e) => setFormData({ ...formData, target_calories: e.target.value })} disabled={!isEditing} className="mt-1"/>
-            </div>
-         </div>
+
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="target_weight">Hedef Kilo (kg)</Label>
+            <Input
+              id="target_weight"
+              type="number"
+              step="0.1"
+              value={formData.target_weight}
+              onChange={(e) => setFormData({ ...formData, target_weight: e.target.value })}
+              disabled={!isEditing}
+              className="mt-1"
+            />
+          </div>
+
+          <div>
+            <Label>Aktivite Seviyesi</Label>
+            <RadioGroup
+              name="activity_level"
+              value={formData.activity_level}
+              onValueChange={(v) => setFormData({ ...formData, activity_level: v })}
+              className="space-y-2 mt-2"
+              disabled={!isEditing}
+            >
+              <Label htmlFor="p-sedentary" className="flex items-center p-2 border rounded-lg cursor-pointer text-sm">
+                <RadioGroupItem value="sedentary" id="p-sedentary" className="mr-2" />
+                <Snowflake className="w-5 h-5 mr-2" /> Hareketsiz
+              </Label>
+
+              <Label htmlFor="p-light" className="flex items-center p-2 border rounded-lg cursor-pointer text-sm">
+                <RadioGroupItem value="light" id="p-light" className="mr-2" />
+                <Wind className="w-5 h-5 mr-2" /> Hafif Aktif
+              </Label>
+
+              <Label htmlFor="p-moderate" className="flex items-center p-2 border rounded-lg cursor-pointer text-sm">
+                <RadioGroupItem value="moderate" id="p-moderate" className="mr-2" />
+                <Flame className="w-5 h-5 mr-2" /> Orta Aktif
+              </Label>
+
+              <Label htmlFor="p-active" className="flex items-center p-2 border rounded-lg cursor-pointer text-sm">
+                <RadioGroupItem value="active" id="p-active" className="mr-2" />
+                <Star className="w-5 h-5 mr-2" /> Çok Aktif
+              </Label>
+            </RadioGroup>
+
+            <p className="text-xs text-gray-500 mt-2">
+              Kalori hedefiniz aktivite seviyenize göre otomatik hesaplanır.
+            </p>
+          </div>
+
+          <div>
+            <Label htmlFor="target_calories">Günlük Kalori Hedefi (kcal)</Label>
+            <Input
+              id="target_calories"
+              type="number"
+              value={formData.target_calories}
+              onChange={(e) => setFormData({ ...formData, target_calories: e.target.value })}
+              disabled={!isEditing}
+              className="mt-1"
+            />
+          </div>
+        </div>
+
       </motion.div>
     </div>
   );
