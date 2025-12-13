@@ -1,100 +1,64 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { Search, Plus, Utensils, Drumstick, Apple, Coffee, Loader2, Zap, Camera } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Label } from '@/components/ui/label';
+import { Camera, Loader2, Zap } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { v4 as uuidv4 } from 'uuid';
 
 const FOOD_BUCKET = "food-images";
 
+// Plan limitleri
+const planLimitsForUi = {
+  free: { daily: 3, weekly: 15, monthly: 30 },
+  basic: { daily: 10, weekly: 50, monthly: 100 },
+  pro: { daily: 20, weekly: 100, monthly: 200 },
+  kapsamli: { daily: 99999, weekly: 99999, monthly: 99999 },
+  "sub_premium_monthly": { daily: 30, weekly: 150, monthly: 300 },
+  "sub_pro_monthly": { daily: 50, weekly: 250, monthly: 500 },
+  "sub_unlimited_monthly": { daily: 99999, weekly: 99999, monthly: 99999 }
+};
+
 export const MealTracker = ({ addMeal }) => {
   const { toast } = useToast();
   const { user, userData } = useAuth();
 
-  // AI kota UI hesapları (sadece görsel gösterim için)
-  const planLimitsForUi = {
-    free: { daily: 3 }, 
-    basic: { daily: 10 },
-    pro: { daily: 20 },
-    kapsamli: { daily: 99999 },
-    "sub_premium_monthly": { daily: 30 },
-    "sub_pro_monthly": { daily: 50 },
-    "sub_unlimited_monthly": { daily: 99999 }
-  };
-
-  const currentPlan = userData?.plan_tier || 'free';
-  const quotaLimit = planLimitsForUi[currentPlan]?.daily ?? planLimitsForUi.free.daily;
-  const currentQuota = Number(userData?.ai_daily_used ?? 0);
-  const isQuotaReached = currentQuota >= quotaLimit;
-
-  // STATE'LER
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedFood, setSelectedFood] = useState(null);
-  const [quantity, setQuantity] = useState(100);
-  const [unit, setUnit] = useState('gram');
-  const [mealType, setMealType] = useState('Kahvaltı');
-
-  // AI FOTOĞRAF STATE
-  const fileInputRef = useRef(null);
   const [aiFile, setAiFile] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
+  const [isQuotaReached, setIsQuotaReached] = useState(false);
+  
+  const fileInputRef = useRef(null);
 
-  //---------------------------------------------
-  // KOTA KONTROLÜ
-  //---------------------------------------------
-  const PLAN_LIMITS = {
-    free: { daily: 3, monthly: 3 },
-    basic: { daily: 10, monthly: 30 },
-    pro: { daily: 20, monthly: 60 },
-    kapsamli: { daily: 99999, monthly: 99999 },
-    "sub_premium_monthly": { daily: 30, monthly: 1000 },
-    "sub_pro_monthly": { daily: 50, monthly: 2000 },
-    "sub_unlimited_monthly": { daily: 99999, monthly: 99999 }
+  // Plan ve kota limitlerini al
+  const currentPlan = userData?.plan_tier || 'free';
+  const currentLimits = planLimitsForUi[currentPlan] || planLimitsForUi.free;
+  const currentQuota = Number(userData?.ai_daily_used || 0);
+
+  // Kota kontrolü ve limitleri düşürme
+  const checkAndUpdateQuota = async () => {
+    if (currentQuota >= currentLimits.daily) {
+      setIsQuotaReached(true);
+      toast({
+        variant: 'destructive',
+        title: 'Limit Doldu',
+        description: 'Günlük AI kullanım limitiniz doldu.',
+      });
+      return false;
+    }
+
+    // Kota güncelleme işlemi
+    const updatedQuota = currentQuota + 1;
+    await supabase
+      .from("profiles")
+      .update({ ai_daily_used: updatedQuota })
+      .eq("id", user.id);
+
+    return true;
   };
 
-  const getQuotaData = (user) => {
-    const plan = user.plan_tier || "free";
-    const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
-    const dailyUsed = user.ai_usage_daily || 0;
-    const monthlyUsed = user.ai_usage_monthly || 0;
-
-    return {
-      limits,
-      dailyUsed,
-      monthlyUsed,
-      dailyRemaining: limits.daily - dailyUsed,
-      monthlyRemaining: limits.monthly - monthlyUsed,
-      isDailyExceeded: dailyUsed >= limits.daily,
-      isMonthlyExceeded: monthlyUsed >= limits.monthly,
-    };
-  };
-
-  //---------------------------------------------
-  // FOTOĞRAF SEÇİLDİĞİNDE
-  //---------------------------------------------
+  // Fotoğraf yükleme işlemi
   const handleFileChange = (e) => {
     if (e.target.files?.length > 0) {
       setAiFile(e.target.files[0]);
@@ -108,17 +72,25 @@ export const MealTracker = ({ addMeal }) => {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  // Fotoğraf analizi işlemi
   const handleAnalyze = async () => {
-    if (!aiFile || !user || isAnalyzing) return;
+    if (!aiFile || isAnalyzing) return;
 
     setIsAnalyzing(true);
-    setAnalysisResult(null);
+
+    // Kota kontrolü
+    const allowed = await checkAndUpdateQuota();
+    if (!allowed) {
+      setIsAnalyzing(false);
+      return;
+    }
 
     try {
-      // Fotoğraf Yükleme
-      const ext = aiFile.name.split(".").pop();
+      // Fotoğraf yükleme
+      const ext = aiFile.name.split('.').pop();
       const fileName = `${uuidv4()}.${ext}`;
       const filePath = `${user.id}/${fileName}`;
+
       const { error: uploadError } = await supabase.storage
         .from(FOOD_BUCKET)
         .upload(filePath, aiFile);
@@ -133,28 +105,29 @@ export const MealTracker = ({ addMeal }) => {
       const imageUrl = publicData?.publicUrl;
       if (!imageUrl) throw new Error("PUBLIC_URL_FAIL");
 
-      // AI Analiz
+      // AI analizi yap
       const { data, error } = await supabase.functions.invoke(
         "analyze-food-image",
         { body: { imageUrl }, headers: { Authorization: `Bearer ${user.access_token}` } }
       );
 
       if (error) throw error;
-
       setAnalysisResult(data);
-      await incrementAiUsage(supabase, user.id);
-
     } catch (err) {
       console.error(err);
-      toast({ variant: "destructive", title: "Analiz Hatası", description: "Analiz yapılamadı." });
+      toast({
+        variant: "destructive",
+        title: "Analiz Hatası",
+        description: "Analiz yapılamadı.",
+      });
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  // Yüklenen fotoğrafın ikonunu gösterme
+  // Fotoğrafın gösterimi (ikon şeklinde)
   const PhotoIcon = aiFile ? (
-    <img src={URL.createObjectURL(aiFile)} alt="Fotoğraf Yükleniyor" className="rounded-md w-16 h-16 object-cover" />
+    <img src={URL.createObjectURL(aiFile)} alt="Fotoğraf" className="rounded-md w-16 h-16 object-cover" />
   ) : (
     <Camera className="w-16 h-16 text-emerald-600" />
   );
@@ -184,6 +157,7 @@ export const MealTracker = ({ addMeal }) => {
         totalGram = quantity;
     }
 
+    // Ürün 100 gramlık değer içeriyor → multiplier hesaplıyoruz
     return totalGram / 100;
   };
 
