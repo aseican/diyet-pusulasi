@@ -1,15 +1,25 @@
 // ======================================================================
-//                        FULL & WORKING MealTracker.jsx
-//                 (Native picker + 0-byte fix integrated)
+//                        FIXED & STABLE MealTracker.jsx
 // ======================================================================
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { supabase } from '@/lib/customSupabaseClient';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { useToast } from '@/components/ui/use-toast';
-import { Search, Plus, Utensils, Drumstick, Apple, Coffee, Loader2, Zap, Camera } from 'lucide-react';
+import React, { useState, useCallback, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { supabase } from "@/lib/customSupabaseClient";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/use-toast";
+import {
+  Search,
+  Plus,
+  Utensils,
+  Drumstick,
+  Apple,
+  Coffee,
+  Loader2,
+  Zap,
+  Camera,
+  Image as ImageIcon,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -17,7 +27,7 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from '@/components/ui/dialog';
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -25,43 +35,150 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Label } from '@/components/ui/label';
-import { useAuth } from '@/contexts/SupabaseAuthContext';
-import { v4 as uuidv4 } from 'uuid';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Label } from "@/components/ui/label";
+import { useAuth } from "@/contexts/SupabaseAuthContext";
+import { v4 as uuidv4 } from "uuid";
 
 const FOOD_BUCKET = "food-images";
+
+// -----------------------------
+// PLAN LIMITS (DB kolonlarına göre)
+// -----------------------------
+const PLAN_LIMITS = {
+  free: { daily: 3, monthly: 3 },
+  basic: { daily: 10, monthly: 30 },
+  pro: { daily: 20, monthly: 60 },
+  kapsamli: { daily: 99999, monthly: 99999 },
+
+  // Google Play productId’ler
+  sub_premium_monthly: { daily: 30, monthly: 1000 },
+  sub_pro_monthly: { daily: 50, monthly: 2000 },
+  sub_unlimited_monthly: { daily: 99999, monthly: 99999 },
+};
+
+// -----------------------------
+// QUOTA CHECK + RESET (profiles kolonlarına göre)
+// Beklenen kolonlar:
+// - plan_tier
+// - ai_daily_used
+// - ai_monthly_used
+// - ai_last_use_date  (YYYY-MM-DD)
+// - ai_last_use_month (YYYY-MM)
+// -----------------------------
+async function checkAndUpdateQuota(supabaseClient, userId) {
+  const { data: user, error } = await supabaseClient
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .single();
+
+  if (error || !user) return { allowed: false, reason: "USER_NOT_FOUND" };
+
+  const today = new Date().toISOString().split("T")[0];
+  const month = new Date().toISOString().slice(0, 7);
+
+  const limits = PLAN_LIMITS[user.plan_tier] || PLAN_LIMITS.free;
+
+  let dailyUsed = user.ai_daily_used ?? 0;
+  let monthlyUsed = user.ai_monthly_used ?? 0;
+
+  // Günlük reset
+  if (user.ai_last_use_date !== today) {
+    dailyUsed = 0;
+    await supabaseClient
+      .from("profiles")
+      .update({ ai_daily_used: 0, ai_last_use_date: today })
+      .eq("id", userId);
+  }
+
+  // Aylık reset
+  if (user.ai_last_use_month !== month) {
+    monthlyUsed = 0;
+    await supabaseClient
+      .from("profiles")
+      .update({ ai_monthly_used: 0, ai_last_use_month: month })
+      .eq("id", userId);
+  }
+
+  // Limit kontrol
+  if (dailyUsed >= limits.daily)
+    return { allowed: false, reason: "DAILY_LIMIT_REACHED", quota: { dailyUsed, limits } };
+
+  if (monthlyUsed >= limits.monthly)
+    return { allowed: false, reason: "MONTHLY_LIMIT_REACHED", quota: { monthlyUsed, limits } };
+
+  return { allowed: true, quota: { dailyUsed, monthlyUsed, limits }, user };
+}
+
+async function incrementAiUsage(supabaseClient, userId) {
+  const { data: user, error } = await supabaseClient
+    .from("profiles")
+    .select("ai_daily_used, ai_monthly_used")
+    .eq("id", userId)
+    .single();
+
+  if (error || !user) return;
+
+  const today = new Date().toISOString().split("T")[0];
+  const month = new Date().toISOString().slice(0, 7);
+
+  const daily = (user.ai_daily_used ?? 0) + 1;
+  const monthly = (user.ai_monthly_used ?? 0) + 1;
+
+  await supabaseClient
+    .from("profiles")
+    .update({
+      ai_daily_used: daily,
+      ai_monthly_used: monthly,
+      ai_last_use_date: today,
+      ai_last_use_month: month,
+    })
+    .eq("id", userId);
+}
+
+// -----------------------------
+// Optional: HEIC normalize (istersen sonra ekleriz)
+// Şimdilik direkt file döndürüyoruz (stabil olsun)
+// -----------------------------
+async function normalizeImageFile(file) {
+  return file;
+}
 
 export const MealTracker = ({ addMeal }) => {
   const { toast } = useToast();
   const { user, userData } = useAuth();
 
-  // AI kota UI hesapları (sadece görsel gösterim için)
-  const planLimitsForUi = {
-    free: { daily: 3 },
-    basic: { daily: 10 },
-    pro: { daily: 20 },
-    kapsamli: { daily: 99999 },
-    Kapsamlı: { daily: 99999 },
-    sub_unlimited_monthly: { daily: 99999 },
-    "sub_premium_monthly": { daily: 30 },
-    "sub_pro_monthly": { daily: 50 },
-    "sub_unlimited_monthly": { daily: 99999 }
-  };
+  // ✅ Tabs state (kalıcı + stabil)
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      return localStorage.getItem("mealtracker_activeTab") || "manual";
+    } catch {
+      return "manual";
+    }
+  });
 
-  const currentPlan = userData?.plan_tier || 'free';
-  const quotaLimit = planLimitsForUi[currentPlan]?.daily ?? planLimitsForUi.free.daily;
+  useEffect(() => {
+    try {
+      localStorage.setItem("mealtracker_activeTab", activeTab);
+    } catch {}
+  }, [activeTab]);
+
+  // Kullanıcı planı (UI için)
+  const currentPlan = userData?.plan_tier || "free";
+  const quotaLimit = PLAN_LIMITS[currentPlan]?.daily ?? PLAN_LIMITS.free.daily;
   const currentQuota = Number(userData?.ai_daily_used ?? 0);
   const isQuotaReached = currentQuota >= quotaLimit;
 
   // STATE'LER
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [loading, setLoading] = useState(false);
+
   const [selectedFood, setSelectedFood] = useState(null);
   const [quantity, setQuantity] = useState(100);
-  const [unit, setUnit] = useState('gram');
-  const [mealType, setMealType] = useState('Kahvaltı');
+  const [unit, setUnit] = useState("gram");
+  const [mealType, setMealType] = useState("Kahvaltı");
 
   // AI FOTOĞRAF STATE
   const fileInputRef = useRef(null);
@@ -69,23 +186,28 @@ export const MealTracker = ({ addMeal }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
 
-  // =============================
-  // Mobile-friendly debug logging
-  // =============================
+  // AI debug logs
   const [aiDebugLogs, setAiDebugLogs] = useState([]);
   const [showAiDebug, setShowAiDebug] = useState(false);
 
   const debugLog = useCallback((label, data) => {
     const ts = new Date().toISOString();
-    const line = typeof data === "undefined"
-      ? `[${ts}] ${label}`
-      : `[${ts}] ${label} ${(() => {
-        try { return JSON.stringify(data); } catch { return String(data); }
-      })()}`;
+    const line =
+      typeof data === "undefined"
+        ? `[${ts}] ${label}`
+        : `[${ts}] ${label} ${(() => {
+            try {
+              return JSON.stringify(data);
+            } catch {
+              return String(data);
+            }
+          })()}`;
 
+    // console
     // eslint-disable-next-line no-console
     console.log(line);
 
+    // on-screen
     setAiDebugLogs((prev) => {
       const next = [...prev, line];
       return next.length > 200 ? next.slice(next.length - 200) : next;
@@ -99,22 +221,21 @@ export const MealTracker = ({ addMeal }) => {
       await navigator.clipboard.writeText(aiDebugLogs.join("\n"));
       toast({ title: "Kopyalandı", description: "Debug logları panoya kopyalandı." });
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error(e);
-      toast({ variant: "destructive", title: "Kopyalanamadı", description: "Panoya kopyalanamadı (izin engeli olabilir)." });
+      toast({
+        variant: "destructive",
+        title: "Kopyalanamadı",
+        description: "Panoya kopyalanamadı (izin engeli olabilir).",
+      });
     }
   }, [aiDebugLogs, toast]);
 
-  // =====================================================
-  // Native (Android WebView) picker integration
-  // =====================================================
-  const isNativePickerAvailable = typeof window !== "undefined"
-    && !!window.NativeImage
-    && typeof window.NativeImage.pickImageFromGallery === "function";
-
+  // ✅ Foto seçilince AI tab’a kilitle (geri dönme hissini bitirir)
   useEffect(() => {
-    // Android native tarafı base64 + mime döndürecek.
-    // MainActivity.kt: window.__nativeImagePickResult(b64, mime) çağırıyor.
+    if (aiFile) setActiveTab("ai");
+  }, [aiFile]);
+
+  // ✅ Native Android picker callback: window.__nativeImagePickResult(b64, mime)
+  useEffect(() => {
     window.__nativeImagePickResult = (b64, mime) => {
       try {
         if (!b64) {
@@ -141,220 +262,20 @@ export const MealTracker = ({ addMeal }) => {
 
         setAiFile(file);
         setAnalysisResult(null);
+        setActiveTab("ai");
 
-        // input'u temizleyelim (web fallback karışmasın)
-        if (fileInputRef.current) fileInputRef.current.value = '';
+        if (fileInputRef.current) fileInputRef.current.value = "";
       } catch (e) {
         debugLog("Native pick decode failed", { message: e?.message, name: e?.name });
-        toast({
-          variant: "destructive",
-          title: "Fotoğraf Hatası",
-          description: "Fotoğraf alınamadı. (Native dönüşüm hatası)",
-        });
       }
     };
 
     return () => {
-      // opsiyonel: temizlemek istersen
-      // delete window.__nativeImagePickResult;
+      // cleanup (optional)
+      // eslint-disable-next-line no-underscore-dangle
+      window.__nativeImagePickResult = undefined;
     };
-  }, [debugLog, toast]);
-
-  const openPhotoPicker = useCallback(() => {
-    if (isNativePickerAvailable) {
-      debugLog("Opening native gallery picker");
-      window.NativeImage.pickImageFromGallery();
-      return;
-    }
-    debugLog("Opening web file input picker");
-    fileInputRef.current?.click();
-  }, [isNativePickerAvailable, debugLog]);
-
-  const normalizeImageFile = useCallback(async (file) => {
-    if (!file) return file;
-
-    const name = file?.name || "";
-    const type = (file?.type || "").toLowerCase();
-
-    debugLog("Selected file", { name, type, size: file?.size });
-
-    const isHeic = type.includes("image/heic") || type.includes("image/heif") || /\.heic$/i.test(name) || /\.heif$/i.test(name);
-    if (!isHeic) return file;
-
-    debugLog("HEIC detected -> converting to JPEG");
-    try {
-      const mod = await import("heic2any");
-      const heic2any = mod?.default || mod;
-
-      const convertedBlob = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.92 });
-      const jpegBlob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
-
-      const jpegName = (name && name.includes(".")) ? name.replace(/\.(heic|heif)$/i, ".jpg") : `photo_${Date.now()}.jpg`;
-      const jpegFile = new File([jpegBlob], jpegName, { type: "image/jpeg" });
-
-      debugLog("HEIC->JPEG success", { jpegName, type: jpegFile.type, size: jpegFile.size });
-      return jpegFile;
-    } catch (e) {
-      debugLog("HEIC conversion failed", { message: e?.message, name: e?.name });
-      return file;
-    }
   }, [debugLog]);
-
-  //---------------------------------------------
-  // PLAN LİMİTLERİ
-  //---------------------------------------------
-  const PLAN_LIMITS = {
-    free: { daily: 3, monthly: 3 },
-    basic: { daily: 10, monthly: 30 },
-    pro: { daily: 20, monthly: 60 },
-    kapsamli: { daily: 99999, monthly: 99999 },
-
-    "sub_premium_monthly": { daily: 30, monthly: 1000 },
-    "sub_pro_monthly": { daily: 50, monthly: 2000 },
-    "sub_unlimited_monthly": { daily: 99999, monthly: 99999 }
-  };
-
-  function resetIfNeeded(user) {
-    const now = new Date();
-    const lastDaily = user.last_daily_reset ? new Date(user.last_daily_reset) : null;
-    const lastMonthly = user.last_monthly_reset ? new Date(user.last_monthly_reset) : null;
-
-    let needsDailyReset = false;
-    let needsMonthlyReset = false;
-
-    if (!lastDaily || lastDaily.toDateString() !== now.toDateString()) {
-      needsDailyReset = true;
-    }
-
-    if (!lastMonthly || lastMonthly.getMonth() !== now.getMonth()) {
-      needsMonthlyReset = true;
-    }
-
-    return { needsDailyReset, needsMonthlyReset };
-  }
-
-  function getQuotaData(user) {
-    const plan = user.plan_tier || "free";
-    const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
-
-    const dailyUsed = user.ai_usage_daily || 0;
-    const monthlyUsed = user.ai_usage_monthly || 0;
-
-    return {
-      limits,
-      dailyUsed,
-      monthlyUsed,
-      dailyRemaining: limits.daily - dailyUsed,
-      monthlyRemaining: limits.monthly - monthlyUsed,
-      isDailyExceeded: dailyUsed >= limits.daily,
-      isMonthlyExceeded: monthlyUsed >= limits.monthly,
-    };
-  }
-
-  async function checkAndUpdateQuota(supabase, userId) {
-    const { data: user, error } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", userId)
-      .single();
-
-    if (error || !user)
-      return { allowed: false, reason: "USER_NOT_FOUND" };
-
-    const today = new Date().toISOString().split("T")[0];
-    const month = new Date().toISOString().slice(0, 7);
-
-    let dailyUsed = user.ai_daily_used || 0;
-    let monthlyUsed = user.ai_monthly_used || 0;
-
-    const planLimits = {
-      free: { daily: 3, monthly: 3 },
-      basic: { daily: 10, monthly: 30 },
-      pro: { daily: 20, monthly: 60 },
-      kapsamli: { daily: 99999, monthly: 99999 },
-
-      "sub_premium_monthly": { daily: 30, monthly: 1000 },
-      "sub_pro_monthly": { daily: 50, monthly: 2000 },
-      "sub_unlimited_monthly": { daily: 99999, monthly: 99999 }
-    };
-
-    const limits = planLimits[user.plan_tier] || planLimits.free;
-
-    if (user.ai_last_use_date !== today) {
-      dailyUsed = 0;
-      await supabase
-        .from("profiles")
-        .update({
-          ai_daily_used: 0,
-          ai_last_use_date: today,
-        })
-        .eq("id", userId);
-    }
-
-    if (user.ai_last_use_month !== month) {
-      monthlyUsed = 0;
-      await supabase
-        .from("profiles")
-        .update({
-          ai_monthly_used: 0,
-          ai_last_use_month: month,
-        })
-        .eq("id", userId);
-    }
-
-    if (dailyUsed >= limits.daily) {
-      return {
-        allowed: false,
-        reason: "DAILY_LIMIT_REACHED",
-        quota: { dailyUsed, limits },
-      };
-    }
-
-    async function incrementAiUsage(supabase, userId) {
-      const { data: user, error } = await supabase
-        .from("profiles")
-        .select("ai_daily_used, ai_monthly_used")
-        .eq("id", userId)
-        .single();
-
-      if (error || !user) return;
-
-      const today = new Date().toISOString().split("T")[0];
-      const month = new Date().toISOString().slice(0, 7);
-
-      const daily = (user.ai_daily_used ?? 0) + 1;
-      const monthly = (user.ai_monthly_used ?? 0) + 1;
-
-      await supabase
-        .from("profiles")
-        .update({
-          ai_daily_used: daily,
-          ai_monthly_used: monthly,
-          ai_last_use_date: today,
-          ai_last_use_month: month,
-        })
-        .eq("id", userId);
-    }
-
-    if (monthlyUsed >= limits.monthly) {
-      return {
-        allowed: false,
-        reason: "MONTHLY_LIMIT_REACHED",
-        quota: { monthlyUsed, limits },
-      };
-    }
-
-    return {
-      allowed: true,
-      quota: {
-        dailyUsed,
-        monthlyUsed,
-        limits,
-      },
-      user,
-      incrementAiUsage, // dışarıdan çağırmak için dönelim
-    };
-  }
 
   // =====================================================
   //                     SEARCH FOODS
@@ -368,21 +289,19 @@ export const MealTracker = ({ addMeal }) => {
     setLoading(true);
 
     const { data, error } = await supabase
-      .from('foods')
-      .select('id, name_tr, calories, protein, carbs, fat, unit_gram, category')
-      .ilike('name_tr', `%${searchTerm}%`)
+      .from("foods")
+      .select("id, name_tr, calories, protein, carbs, fat, unit_gram, category")
+      .ilike("name_tr", `%${searchTerm}%`)
       .limit(50);
 
     if (error) {
-      // eslint-disable-next-line no-console
-      console.error(error);
       toast({
-        variant: 'destructive',
-        title: 'Arama Hatası',
-        description: 'Yiyecekler aranırken bir hata oluştu.',
+        variant: "destructive",
+        title: "Arama Hatası",
+        description: "Yiyecekler aranırken bir hata oluştu.",
       });
     } else {
-      setSearchResults(data);
+      setSearchResults(data || []);
     }
 
     setLoading(false);
@@ -396,67 +315,69 @@ export const MealTracker = ({ addMeal }) => {
   // =====================================================
   //                MANUEL YEMEK EKLEME
   // =====================================================
-  const getMultiplier = (unit, quantity, food) => {
+  const getMultiplier = (unitValue, qty, food) => {
     let totalGram = 0;
 
-    switch (unit) {
-      case 'gram':
-        totalGram = quantity;
+    switch (unitValue) {
+      case "gram":
+        totalGram = qty;
         break;
-
-      case 'adet':
-        totalGram = quantity * (food.unit_gram || 100);
+      case "adet":
+        totalGram = qty * (food.unit_gram || 100);
         break;
-
-      case 'porsiyon':
-        totalGram = quantity * (food.portion_gram || 200);
+      case "porsiyon":
+        totalGram = qty * 200;
         break;
-
-      case 'bardak':
-        totalGram = quantity * 200;
+      case "bardak":
+        totalGram = qty * 200;
         break;
-
-      case 'kasik':
-        totalGram = quantity * 15;
+      case "kasik":
+        totalGram = qty * 15;
         break;
-
       default:
-        totalGram = quantity;
+        totalGram = qty;
     }
 
+    // foods tablosu 100g bazlı ise:
     return totalGram / 100;
   };
 
-  const handleAddMeal = () => {
-    if (!selectedFood || !quantity || quantity <= 0) {
+  const handleAddMealManual = () => {
+    if (!selectedFood) return;
+
+    const qty = Number(quantity) || 0;
+    if (qty <= 0) {
       toast({
-        variant: 'destructive',
-        title: 'Eksik Bilgi',
-        description: 'Lütfen miktarı giriniz.',
+        variant: "destructive",
+        title: "Eksik Bilgi",
+        description: "Lütfen miktarı giriniz.",
       });
       return;
     }
 
+    const mult = getMultiplier(unit, qty, selectedFood);
+
     const meal = {
       meal_type: mealType,
-      food_name: analysisResult?.name || "Bilinmeyen",
-      calories: Number(analysisResult?.calories ?? 0),
-      protein: Number(analysisResult?.protein ?? 0),
-      carbs: Number(analysisResult?.carbs ?? 0),
-      fat: Number(analysisResult?.fat ?? 0),
-      quantity: Number(analysisResult?.quantity ?? 1),
-      unit: analysisResult?.unit || "adet",
+      food_name: selectedFood.name_tr,
+      calories: Number((selectedFood.calories ?? 0) * mult),
+      protein: Number((selectedFood.protein ?? 0) * mult),
+      carbs: Number((selectedFood.carbs ?? 0) * mult),
+      fat: Number((selectedFood.fat ?? 0) * mult),
+      quantity: qty,
+      unit,
       user_id: user.id,
-      date: new Date().toISOString().split('T')[0],
+      date: new Date().toISOString().split("T")[0],
     };
 
     addMeal(meal);
+
     setSelectedFood(null);
-    setSearchTerm('');
+    setSearchTerm("");
     setSearchResults([]);
 
     toast({
-      title: 'Öğün Eklendi',
+      title: "Öğün Eklendi",
       description: `${meal.food_name} başarıyla eklendi.`,
     });
   };
@@ -466,10 +387,9 @@ export const MealTracker = ({ addMeal }) => {
   // =====================================================
   const handleFileChange = (e) => {
     if (e.target.files?.length > 0) {
-      const f = e.target.files[0];
-      setAiFile(f);
+      setAiFile(e.target.files[0]);
       setAnalysisResult(null);
-      debugLog("Web input file selected", { name: f?.name, type: f?.type, size: f?.size });
+      setActiveTab("ai");
     }
   };
 
@@ -478,31 +398,32 @@ export const MealTracker = ({ addMeal }) => {
     setAnalysisResult(null);
 
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      fileInputRef.current.value = "";
     }
+  };
+
+  const openNativePickerIfExists = () => {
+    try {
+      // Android WebView bridge: NativeImage.pickImageFromGallery()
+      if (window?.NativeImage?.pickImageFromGallery) {
+        debugLog("Calling native gallery picker");
+        window.NativeImage.pickImageFromGallery();
+        return true;
+      }
+    } catch (e) {
+      debugLog("Native picker call failed", { message: e?.message });
+    }
+    return false;
   };
 
   const handleAnalyze = async () => {
     if (!aiFile || !user || isAnalyzing) return;
 
-    // ✅ extra guard: 0-byte ise hiç başlama
-    if (aiFile.size === 0) {
-      debugLog("Blocked analyze: 0-byte file", { name: aiFile?.name, type: aiFile?.type, size: aiFile?.size });
-      setShowAiDebug(true);
-      toast({
-        variant: "destructive",
-        title: "Fotoğraf Hatası",
-        description: "Seçilen görsel boş (0 byte). Android'de native picker ile seçmeyi deneyin.",
-      });
-      return;
-    }
-
     setIsAnalyzing(true);
     setAnalysisResult(null);
 
-    // === 1) KOTA KONTROLÜ ===
+    // 1) quota
     const quota = await checkAndUpdateQuota(supabase, user.id);
-
     if (!quota.allowed) {
       toast({
         variant: "destructive",
@@ -517,24 +438,31 @@ export const MealTracker = ({ addMeal }) => {
     }
 
     try {
-      // === 2) Fotoğraf yükleme ===
+      // 2) upload
       const normalizedFile = await normalizeImageFile(aiFile);
-
-      // burada da 0-byte kontrol
-      if (!normalizedFile || normalizedFile.size === 0) {
-        debugLog("Blocked upload: normalized file is 0-byte", { name: normalizedFile?.name, type: normalizedFile?.type, size: normalizedFile?.size });
-        throw new Error("EMPTY_FILE_AFTER_NORMALIZE");
-      }
 
       const safeName = normalizedFile?.name || aiFile?.name || "";
       const extFromName = safeName.includes(".") ? safeName.split(".").pop() : null;
-      const extFromType = (normalizedFile?.type || aiFile?.type || "").split("/")[1] || null;
+      const extFromType = (normalizedFile?.type || aiFile?.type || "")
+        .split("/")[1]
+        ?.trim();
       const ext = (extFromName || extFromType || "jpg").toLowerCase();
 
       const fileName = `${uuidv4()}.${ext}`;
       const filePath = `${user.id}/${fileName}`;
 
-      debugLog("Uploading to storage", { bucket: FOOD_BUCKET, filePath, ext, contentType: normalizedFile?.type || aiFile?.type });
+      debugLog("Selected file", {
+        name: safeName,
+        type: normalizedFile?.type || aiFile?.type,
+        size: normalizedFile?.size || aiFile?.size,
+      });
+
+      debugLog("Uploading to storage", {
+        bucket: FOOD_BUCKET,
+        filePath,
+        ext,
+        contentType: normalizedFile?.type || aiFile?.type || "image/jpeg",
+      });
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(FOOD_BUCKET)
@@ -544,33 +472,34 @@ export const MealTracker = ({ addMeal }) => {
           cacheControl: "3600",
         });
 
-      debugLog("Upload result", { ok: !uploadError, uploadData, uploadError: uploadError?.message || uploadError });
+      debugLog("Upload result", {
+        ok: !uploadError,
+        uploadData,
+        uploadError: uploadError?.message || uploadError,
+      });
 
       if (uploadError) throw uploadError;
 
-      // === 3) Public URL ===
-      const { data: publicData } = supabase.storage
-        .from(FOOD_BUCKET)
-        .getPublicUrl(filePath);
-
+      // 3) public URL
+      const { data: publicData } = supabase.storage.from(FOOD_BUCKET).getPublicUrl(filePath);
       const imageUrl = publicData?.publicUrl;
       if (!imageUrl) throw new Error("PUBLIC_URL_FAIL");
 
-      // === 4) Session ===
-      const { data: { session } } = await supabase.auth.getSession();
+      // 4) session token
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
       debugLog("Session check", { hasSession: !!session, hasToken: !!session?.access_token });
       if (!session?.access_token) throw new Error("NO_SESSION");
 
-      // === 5) AI ANALİZ ===
-      debugLog("Invoking function", { fn: "analyze-food-image", imageUrlLen: imageUrl?.length });
+      // 5) invoke function
+      debugLog("Invoking function", { fn: "analyze-food-image", imageUrlLen: imageUrl.length });
 
-      const { data, error } = await supabase.functions.invoke(
-        "analyze-food-image",
-        {
-          body: { imageUrl },
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        }
-      );
+      const { data, error } = await supabase.functions.invoke("analyze-food-image", {
+        body: { imageUrl },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
 
       debugLog("Function response", {
         ok: !error,
@@ -582,16 +511,9 @@ export const MealTracker = ({ addMeal }) => {
 
       setAnalysisResult(data);
 
-      // === 6) KULLANIM HAKKINI DÜŞÜR ===
-      // checkAndUpdateQuota içinden dönen incrementAiUsage fonksiyonu
-      if (typeof quota.incrementAiUsage === "function") {
-        await quota.incrementAiUsage(supabase, user.id);
-      }
-
+      // 6) increment usage
+      await incrementAiUsage(supabase, user.id);
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error(err);
-
       debugLog("Analyze error (catch)", {
         message: err?.message,
         name: err?.name,
@@ -599,7 +521,6 @@ export const MealTracker = ({ addMeal }) => {
         code: err?.code,
         details: err?.details,
         hint: err?.hint,
-        stack: err?.stack ? String(err.stack).slice(0, 1000) : undefined,
       });
 
       setShowAiDebug(true);
@@ -615,65 +536,65 @@ export const MealTracker = ({ addMeal }) => {
   };
 
   const handleConfirmMealFromAI = () => {
-    if (!analysisResult) return;
+    if (!analysisResult || !user) return;
 
     const meal = {
       meal_type: mealType,
-      food_name: analysisResult.name,
-      calories: analysisResult.calories,
-      protein: analysisResult.protein,
-      carbs: analysisResult.carbs,
-      fat: analysisResult.fat,
-      quantity: analysisResult.quantity,
-      unit: analysisResult.unit,
+      food_name: analysisResult.name ?? "Bilinmeyen",
+      calories: Number(analysisResult.calories ?? 0),
+      protein: Number(analysisResult.protein ?? 0),
+      carbs: Number(analysisResult.carbs ?? 0),
+      fat: Number(analysisResult.fat ?? 0),
+      quantity: Number(analysisResult.quantity ?? 1),
+      unit: analysisResult.unit ?? "adet",
       user_id: user.id,
-      date: new Date().toISOString().split('T')[0],
+      date: new Date().toISOString().split("T")[0],
     };
 
     addMeal(meal);
+
     setAnalysisResult(null);
     setAiFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
 
     toast({
-      title: 'Öğün Eklendi',
+      title: "Öğün Eklendi",
       description: `${meal.food_name} başarıyla kaydedildi.`,
     });
   };
 
   // =====================================================
-  //                        UI
+  //                        UI helpers
   // =====================================================
   const FoodIcon = ({ category }) => {
-    const p = { className: 'w-6 h-6 text-emerald-600' };
-    if (category === 'kahvalti') return <Coffee {...p} />;
-    if (category === 'ana_yemek') return <Drumstick {...p} />;
-    if (category === 'ara_ogun') return <Apple {...p} />;
+    const p = { className: "w-6 h-6 text-emerald-600" };
+    if (category === "kahvalti") return <Coffee {...p} />;
+    if (category === "ana_yemek") return <Drumstick {...p} />;
+    if (category === "ara_ogun") return <Apple {...p} />;
     return <Utensils {...p} />;
   };
 
   const calculatedMacros = selectedFood
     ? (() => {
-      const multiplier = getMultiplier(unit, selectedFood);
-      const total = quantity * multiplier;
-      return {
-        calories: (selectedFood.calories * total).toFixed(0),
-        protein: (selectedFood.protein * total).toFixed(1),
-        carbs: (selectedFood.carbs * total).toFixed(1),
-        fat: (selectedFood.fat * total).toFixed(1),
-      };
-    })()
+        const qty = Number(quantity) || 0;
+        const mult = getMultiplier(unit, qty, selectedFood);
+        return {
+          calories: ((selectedFood.calories ?? 0) * mult).toFixed(0),
+          protein: ((selectedFood.protein ?? 0) * mult).toFixed(1),
+          carbs: ((selectedFood.carbs ?? 0) * mult).toFixed(1),
+          fat: ((selectedFood.fat ?? 0) * mult).toFixed(1),
+        };
+      })()
     : null;
 
   return (
     <div className="p-4 space-y-6">
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
         <h1 className="text-2xl font-bold text-gray-800">Öğün Ekle</h1>
-        <p className="text-gray-500">
-          Geniş veritabanından yiyecek arayın veya fotoğrafla analiz edin.
-        </p>
+        <p className="text-gray-500">Geniş veritabanından yiyecek arayın veya fotoğrafla analiz edin.</p>
       </motion.div>
 
-      <Tabs defaultValue="manual" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid grid-cols-2 w-full">
           <TabsTrigger value="manual">Manuel Arama</TabsTrigger>
           <TabsTrigger value="ai">
@@ -700,7 +621,7 @@ export const MealTracker = ({ addMeal }) => {
                   <Loader2 className="animate-spin text-emerald-600 w-6 h-6" />
                 </div>
               ) : (
-                searchResults.map((food) => (
+                (searchResults || []).map((food) => (
                   <motion.div
                     key={food.id}
                     initial={{ opacity: 0, y: -6 }}
@@ -709,15 +630,15 @@ export const MealTracker = ({ addMeal }) => {
                     className="flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer"
                     onClick={() => {
                       setSelectedFood(food);
-                      setQuantity(food.gram > 1 ? 1 : 100);
-                      setUnit(food.gram > 1 ? 'adet' : 'gram');
+                      setQuantity(100);
+                      setUnit("gram");
                     }}
                   >
                     <div className="flex items-center gap-3">
                       <FoodIcon category={food.category} />
                       <div>
                         <p className="font-semibold">{food.name_tr}</p>
-                        <p className="text-sm text-gray-500">{food.calories} kcal</p>
+                        <p className="text-sm text-gray-500">{food.calories} kcal (100g)</p>
                       </div>
                     </div>
                     <Plus className="w-5 h-5 text-emerald-600" />
@@ -727,7 +648,7 @@ export const MealTracker = ({ addMeal }) => {
             </AnimatePresence>
           </div>
 
-          {!loading && searchResults.length === 0 && searchTerm.trim().length >= 2 && (
+          {!loading && (searchResults || []).length === 0 && searchTerm.trim().length >= 2 && (
             <p className="text-center text-sm text-gray-500">Sonuç bulunamadı.</p>
           )}
         </TabsContent>
@@ -739,55 +660,35 @@ export const MealTracker = ({ addMeal }) => {
               <Zap className="mx-auto h-8 w-8 text-red-500" />
               <h3 className="font-semibold text-red-600 mt-2">Günlük Limit Doldu</h3>
               <p className="text-sm text-red-700">Günlük hakkınız: {quotaLimit}</p>
-              <Button className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700">
-                Premium’a Yükselt
-              </Button>
+              <Button className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700">Premium’a Yükselt</Button>
             </div>
           ) : analysisResult ? (
             <div className="space-y-4">
-              <h3 className="text-lg font-bold text-gray-800">
-                Analiz Sonucu: {analysisResult.name}
-              </h3>
+              <h3 className="text-lg font-bold text-gray-800">Analiz Sonucu: {analysisResult.name}</h3>
 
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="p-3 bg-gray-100 rounded-lg">
-                  Kcal:{' '}
-                  <span className="font-bold text-emerald-600">
-                    {analysisResult.calories}
-                  </span>
+                  Kcal: <span className="font-bold text-emerald-600">{analysisResult.calories}</span>
                 </div>
-                <div className="p-3 bg-gray-100 rounded-lg">
-                  Protein: {analysisResult.protein}g
-                </div>
-                <div className="p-3 bg-gray-100 rounded-lg">
-                  Karbonhidrat: {analysisResult.carbs}g
-                </div>
-                <div className="p-3 bg-gray-100 rounded-lg">
-                  Yağ: {analysisResult.fat}g
-                </div>
+                <div className="p-3 bg-gray-100 rounded-lg">Protein: {analysisResult.protein}g</div>
+                <div className="p-3 bg-gray-100 rounded-lg">Karbonhidrat: {analysisResult.carbs}g</div>
+                <div className="p-3 bg-gray-100 rounded-lg">Yağ: {analysisResult.fat}g</div>
                 <div className="col-span-2 p-3 bg-gray-100 rounded-lg">
                   Miktar: {analysisResult.quantity} {analysisResult.unit}
                 </div>
               </div>
 
-              <Button
-                onClick={handleConfirmMealFromAI}
-                className="w-full bg-emerald-600 hover:bg-emerald-700"
-              >
+              <Button onClick={handleConfirmMealFromAI} className="w-full bg-emerald-600 hover:bg-emerald-700">
                 Öğün Olarak Kaydet
               </Button>
 
-              <Button
-                variant="outline"
-                onClick={() => setAnalysisResult(null)}
-                className="w-full"
-              >
+              <Button variant="outline" onClick={() => setAnalysisResult(null)} className="w-full">
                 Yeni Analiz
               </Button>
             </div>
           ) : (
             <div className="space-y-3">
-              {/* GİZLİ INPUT (WEB FALLBACK) */}
+              {/* GİZLİ INPUT */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -799,68 +700,60 @@ export const MealTracker = ({ addMeal }) => {
 
               {/* DEBUG BUTONLARI */}
               <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowAiDebug(true)}
-                  className="flex-1"
-                >
+                <Button type="button" variant="outline" onClick={() => setShowAiDebug(true)} className="flex-1">
                   Debug Logları
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={clearDebug}
-                  className="flex-1"
-                >
+                <Button type="button" variant="outline" onClick={clearDebug} className="flex-1">
                   Temizle
                 </Button>
               </div>
 
-              {/* FOTOĞRAF YÜKLEME BUTONU */}
+              {/* Native picker butonu (Android WebView bridge varsa) */}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  const ok = openNativePickerIfExists();
+                  if (!ok) {
+                    // native yoksa normal file picker
+                    document.getElementById("upload-ai")?.click();
+                  }
+                }}
+                className="w-full"
+              >
+                <ImageIcon className="mr-2 h-4 w-4" />
+                Galeriden Foto Seç
+              </Button>
+
+              {/* Fotoğraf yükleme alanı */}
               {!aiFile && (
                 <Label
-                  role="button"
-                  tabIndex={0}
-                  onClick={openPhotoPicker}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openPhotoPicker(); }}
+                  htmlFor="upload-ai"
                   className="cursor-pointer flex flex-col items-center justify-center p-8 border-2 border-emerald-300 border-dashed rounded-lg hover:bg-emerald-50"
                 >
                   <Camera className="h-8 w-8 text-emerald-500" />
                   <p className="mt-2 font-medium text-emerald-700">Yemek Fotoğrafı Yükle</p>
-                  {isNativePickerAvailable ? (
-                    <p className="mt-1 text-xs text-gray-500">Android uygulama: Native picker kullanılacak</p>
-                  ) : null}
                 </Label>
               )}
 
-              {/* FOTOĞRAF SEÇİLDİYSE ÖN İZLEME + KALDIRMA */}
+              {/* Foto seçildiyse */}
               {aiFile && (
                 <div className="flex flex-col items-center gap-3 p-4 border rounded-lg bg-gray-50">
                   <p className="font-medium text-gray-800 text-sm">{aiFile.name}</p>
-                  <p className="text-xs text-gray-500">Boyut: {aiFile.size} bytes</p>
 
                   <div className="flex gap-3">
-                    <Button
-                      variant="outline"
-                      onClick={openPhotoPicker}
-                      className="border-blue-500 text-blue-600 hover:bg-blue-50"
-                    >
+                    <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
                       Değiştir
                     </Button>
 
-                    <Button
-                      variant="outline"
-                      onClick={removePhoto}
-                      className="border-red-500 text-red-600 hover:bg-red-50"
-                    >
+                    <Button variant="outline" onClick={removePhoto} className="border-red-500 text-red-600 hover:bg-red-50">
                       Kaldır
                     </Button>
                   </div>
                 </div>
               )}
 
-              {/* ANALİZ BUTONU */}
+              {/* Analiz butonu */}
               <Button
                 onClick={handleAnalyze}
                 disabled={!aiFile || isAnalyzing}
@@ -886,7 +779,7 @@ export const MealTracker = ({ addMeal }) => {
         </TabsContent>
       </Tabs>
 
-      {/* MODAL */}
+      {/* MANUEL EKLEME MODAL */}
       <Dialog open={!!selectedFood} onOpenChange={(v) => !v && setSelectedFood(null)}>
         <DialogContent>
           <DialogHeader>
@@ -902,9 +795,7 @@ export const MealTracker = ({ addMeal }) => {
                   type="number"
                   value={quantity}
                   className="mt-1"
-                  onChange={(e) =>
-                    setQuantity(Math.max(1, parseInt(e.target.value) || 1))
-                  }
+                  onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
                 />
               </div>
 
@@ -951,19 +842,14 @@ export const MealTracker = ({ addMeal }) => {
           </div>
 
           <DialogFooter>
-            <Button
-              onClick={handleAddMeal}
-              className="w-full bg-emerald-600 hover:bg-emerald-700"
-            >
+            <Button onClick={handleAddMealManual} className="w-full bg-emerald-600 hover:bg-emerald-700">
               Öğün Olarak Ekle
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ===========================
-          AI DEBUG DIALOG (MOBILE)
-         =========================== */}
+      {/* AI DEBUG DIALOG */}
       <Dialog open={showAiDebug} onOpenChange={setShowAiDebug}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
@@ -990,7 +876,6 @@ export const MealTracker = ({ addMeal }) => {
           </p>
         </DialogContent>
       </Dialog>
-
     </div>
   );
 };
