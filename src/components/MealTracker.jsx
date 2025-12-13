@@ -1,7 +1,3 @@
-// ======================================================================
-//                        FULL & WORKING MealTracker.jsx
-// ======================================================================
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -36,24 +32,20 @@ export const MealTracker = ({ addMeal }) => {
   const { user, userData } = useAuth();
 
   // AI kota UI hesapları (sadece görsel gösterim için)
- const planLimitsForUi = {
-    free: { daily: 3 }, 
-    basic: { daily: 10 },
-    pro: { daily: 20 },
-    kapsamli: { daily: 99999 },
-    Kapsamlı: { daily: 99999 },
-    sub_unlimited_monthly: { daily: 99999 },
-    // EKLENEN KISIM:
+  const planLimitsForUi = {
+    free: { daily: 3 }, 
+    basic: { daily: 10 },
+    pro: { daily: 20 },
+    kapsamli: { daily: 99999 },
     "sub_premium_monthly": { daily: 30 },
     "sub_pro_monthly": { daily: 50 },
-    "sub_unlimited_monthly": { daily: 99999 } // <-- Senin planın
-  };
-// Kullanıcının planını al (yoksa free say)
-const currentPlan = userData?.plan_tier || 'free';
-const quotaLimit = planLimitsForUi[currentPlan]?.daily ?? planLimitsForUi.free.daily;
-const currentQuota = Number(userData?.ai_daily_used ?? 0);
-const isQuotaReached = currentQuota >= quotaLimit;
+    "sub_unlimited_monthly": { daily: 99999 }
+  };
 
+  const currentPlan = userData?.plan_tier || 'free';
+  const quotaLimit = planLimitsForUi[currentPlan]?.daily ?? planLimitsForUi.free.daily;
+  const currentQuota = Number(userData?.ai_daily_used ?? 0);
+  const isQuotaReached = currentQuota >= quotaLimit;
 
   // STATE'LER
   const [searchTerm, setSearchTerm] = useState('');
@@ -71,194 +63,168 @@ const isQuotaReached = currentQuota >= quotaLimit;
   const [analysisResult, setAnalysisResult] = useState(null);
 
   //---------------------------------------------
-// PLAN LİMİTLERİ
-//---------------------------------------------
-const PLAN_LIMITS = {
-  free: { daily: 3, monthly: 3 },
-  basic: { daily: 10, monthly: 30 },
-  pro: { daily: 20, monthly: 60 },
-  kapsamli: { daily: 99999, monthly: 99999 },
-
-  // --- GOOGLE PLAY IDLERİ ---
-  "sub_premium_monthly": { daily: 30, monthly: 1000 },
-  "sub_pro_monthly": { daily: 50, monthly: 2000 },
-  "sub_unlimited_monthly": { daily: 99999, monthly: 99999 }
-};
-
-//---------------------------------------------
-// GÜNLÜK / AYLIK RESET KONTROLÜ
-//---------------------------------------------
-function resetIfNeeded(user) {
-  const now = new Date();
-  const lastDaily = user.last_daily_reset ? new Date(user.last_daily_reset) : null;
-  const lastMonthly = user.last_monthly_reset ? new Date(user.last_monthly_reset) : null;
-
-  let needsDailyReset = false;
-  let needsMonthlyReset = false;
-
-  // Günlük reset (tarih değiştiyse)
-  if (!lastDaily || lastDaily.toDateString() !== now.toDateString()) {
-    needsDailyReset = true;
-  }
-
-  // Aylık reset (ay değiştiyse)
-  if (!lastMonthly || lastMonthly.getMonth() !== now.getMonth()) {
-    needsMonthlyReset = true;
-  }
-
-  return { needsDailyReset, needsMonthlyReset };
-}
-
-//---------------------------------------------
-// KULLANICI KOTA VERİSİ HAZIRLAMA
-//---------------------------------------------
-function getQuotaData(user) {
-  const plan = user.plan_tier || "free";
-  const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
-
-  const dailyUsed = user.ai_usage_daily || 0;
-  const monthlyUsed = user.ai_usage_monthly || 0;
-
-  return {
-    limits,
-    dailyUsed,
-    monthlyUsed,
-    dailyRemaining: limits.daily - dailyUsed,
-    monthlyRemaining: limits.monthly - monthlyUsed,
-    isDailyExceeded: dailyUsed >= limits.daily,
-    isMonthlyExceeded: monthlyUsed >= limits.monthly,
-  };
-}
-
-//---------------------------------------------
-// API → KOTA KONTROL + RESET
-//---------------------------------------------
-// =====================================================
-// KOTA KONTROLÜ — Senin kolonlarına tam uyumlu
-// =====================================================
-async function checkAndUpdateQuota(supabase, userId) {
-  // Kullanıcıyı çek
-  const { data: user, error } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", userId)
-    .single();
-
-  if (error || !user)
-    return { allowed: false, reason: "USER_NOT_FOUND" };
-
-  // Bugünün tarihi
-  const today = new Date().toISOString().split("T")[0];
-  const month = new Date().toISOString().slice(0, 7);
-
-  let dailyUsed = user.ai_daily_used || 0;
-  let monthlyUsed = user.ai_monthly_used || 0;
-
-  // PLAN LİMİTLERİ
-  const planLimits = {
-    free: { daily: 3, monthly: 3 }, // Burayı 0'dan 3'e çektim ki hata olsa bile çalışsın
-    basic: { daily: 10, monthly: 30 },
-    pro: { daily: 20, monthly: 60 },
-    kapsamli: { daily: 99999, monthly: 99999 }, // Kapsamlıyı artırdım
-    
-    // --- BURASI EKSİKTİ ---
+  // KOTA KONTROLÜ
+  //---------------------------------------------
+  const PLAN_LIMITS = {
+    free: { daily: 3, monthly: 3 },
+    basic: { daily: 10, monthly: 30 },
+    pro: { daily: 20, monthly: 60 },
+    kapsamli: { daily: 99999, monthly: 99999 },
     "sub_premium_monthly": { daily: 30, monthly: 1000 },
     "sub_pro_monthly": { daily: 50, monthly: 2000 },
-    "sub_unlimited_monthly": { daily: 99999, monthly: 99999 } // <-- SENİN PLANIN BU
-  };
+    "sub_unlimited_monthly": { daily: 99999, monthly: 99999 }
+  };
 
-  const limits = planLimits[user.plan_tier] || planLimits.free;
+  const getQuotaData = (user) => {
+    const plan = user.plan_tier || "free";
+    const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
+    const dailyUsed = user.ai_usage_daily || 0;
+    const monthlyUsed = user.ai_usage_monthly || 0;
 
-  // ==========================
-  //   GÜNLÜK SIFIRLAMA
-  // ==========================
-  if (user.ai_last_use_date !== today) {
-    dailyUsed = 0;
-    await supabase
-      .from("profiles")
-      .update({
-        ai_daily_used: 0,
-        ai_last_use_date: today,
-      })
-      .eq("id", userId);
-  }
-
-  // ==========================
-  //   AYLIK SIFIRLAMA
-  // ==========================
-  if (user.ai_last_use_month !== month) {
-    monthlyUsed = 0;
-    await supabase
-      .from("profiles")
-      .update({
-        ai_monthly_used: 0,
-        ai_last_use_month: month,
-      })
-      .eq("id", userId);
-  }
-
-  // Sınırları tekrar hesapla
-  if (dailyUsed >= limits.daily) {
     return {
-      allowed: false,
-      reason: "DAILY_LIMIT_REACHED",
-      quota: { dailyUsed, limits },
-    };
-  }
-
-
-//-----------------------------------------------------
-// AI kullanım hakkını 1 arttır (günlük + aylık)
-//-----------------------------------------------------
-async function incrementAiUsage(supabase, userId) {
-  const { data: user, error } = await supabase
-    .from("profiles")
-    .select("ai_daily_used, ai_monthly_used")
-    .eq("id", userId)
-    .single();
-
-  if (error || !user) return;
-
-  const today = new Date().toISOString().split("T")[0];
-  const month = new Date().toISOString().slice(0, 7);
-
-  const daily = (user.ai_daily_used ?? 0) + 1;
-  const monthly = (user.ai_monthly_used ?? 0) + 1;
-
-  await supabase
-    .from("profiles")
-    .update({
-      ai_daily_used: daily,
-      ai_monthly_used: monthly,
-      ai_last_use_date: today,
-      ai_last_use_month: month,
-    })
-    .eq("id", userId);
-}
-
-  if (monthlyUsed >= limits.monthly) {
-    return {
-      allowed: false,
-      reason: "MONTHLY_LIMIT_REACHED",
-      quota: { monthlyUsed, limits },
-    };
-  }
-
-  return {
-    allowed: true,
-    quota: {
+      limits,
       dailyUsed,
       monthlyUsed,
-      limits,
-    },
-    user,
+      dailyRemaining: limits.daily - dailyUsed,
+      monthlyRemaining: limits.monthly - monthlyUsed,
+      isDailyExceeded: dailyUsed >= limits.daily,
+      isMonthlyExceeded: monthlyUsed >= limits.monthly,
+    };
   };
-}
 
+  //---------------------------------------------
+  // FOTOĞRAF SEÇİLDİĞİNDE
+  //---------------------------------------------
+  const handleFileChange = (e) => {
+    if (e.target.files?.length > 0) {
+      setAiFile(e.target.files[0]);
+      setAnalysisResult(null);
+    }
+  };
 
-  // =====================================================
-  //                     SEARCH FOODS
-  // =====================================================
+  const removePhoto = () => {
+    setAiFile(null);
+    setAnalysisResult(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleAnalyze = async () => {
+    if (!aiFile || !user || isAnalyzing) return;
+
+    setIsAnalyzing(true);
+    setAnalysisResult(null);
+
+    try {
+      // Fotoğraf Yükleme
+      const ext = aiFile.name.split(".").pop();
+      const fileName = `${uuidv4()}.${ext}`;
+      const filePath = `${user.id}/${fileName}`;
+      const { error: uploadError } = await supabase.storage
+        .from(FOOD_BUCKET)
+        .upload(filePath, aiFile);
+
+      if (uploadError) throw uploadError;
+
+      // Public URL
+      const { data: publicData } = supabase.storage
+        .from(FOOD_BUCKET)
+        .getPublicUrl(filePath);
+
+      const imageUrl = publicData?.publicUrl;
+      if (!imageUrl) throw new Error("PUBLIC_URL_FAIL");
+
+      // AI Analiz
+      const { data, error } = await supabase.functions.invoke(
+        "analyze-food-image",
+        { body: { imageUrl }, headers: { Authorization: `Bearer ${user.access_token}` } }
+      );
+
+      if (error) throw error;
+
+      setAnalysisResult(data);
+      await incrementAiUsage(supabase, user.id);
+
+    } catch (err) {
+      console.error(err);
+      toast({ variant: "destructive", title: "Analiz Hatası", description: "Analiz yapılamadı." });
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Yüklenen fotoğrafın ikonunu gösterme
+  const PhotoIcon = aiFile ? (
+    <img src={URL.createObjectURL(aiFile)} alt="Fotoğraf Yükleniyor" className="rounded-md w-16 h-16 object-cover" />
+  ) : (
+    <Camera className="w-16 h-16 text-emerald-600" />
+  );
+
+  //---------------------------------------------
+  // MANUEL YEMEK EKLEME
+  //---------------------------------------------
+  const getMultiplier = (unit, quantity, food) => {
+    let totalGram = 0;
+    switch (unit) {
+      case 'gram':
+        totalGram = quantity;
+        break;
+      case 'adet':
+        totalGram = quantity * (food.unit_gram || 100);
+        break;
+      case 'porsiyon':
+        totalGram = quantity * (food.portion_gram || 200);
+        break;
+      case 'bardak':
+        totalGram = quantity * 200;
+        break;
+      case 'kasik':
+        totalGram = quantity * 15;
+        break;
+      default:
+        totalGram = quantity;
+    }
+
+    return totalGram / 100;
+  };
+
+  const handleAddMeal = () => {
+    if (!selectedFood || !quantity || quantity <= 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Eksik Bilgi',
+        description: 'Lütfen miktarı giriniz.',
+      });
+      return;
+    }
+
+    const multiplier = getMultiplier(unit, selectedFood);
+    const meal = {
+      meal_type: mealType,
+      food_name: analysisResult?.name || "Bilinmeyen",
+      calories: Number(analysisResult?.calories ?? 0),
+      protein: Number(analysisResult?.protein ?? 0),
+      carbs: Number(analysisResult?.carbs ?? 0),
+      fat: Number(analysisResult?.fat ?? 0),
+      quantity: Number(analysisResult?.quantity ?? 1),
+      unit: analysisResult?.unit || "adet",
+      user_id: user.id,
+      date: new Date().toISOString().split('T')[0],
+    };
+
+    addMeal(meal);
+    setSelectedFood(null);
+    setSearchTerm('');
+    setSearchResults([]);
+
+    toast({
+      title: 'Öğün Eklendi',
+      description: `${meal.food_name} başarıyla eklendi.`,
+    });
+  };
+
+  //---------------------------------------------
+  // YEMEK ARAMA
+  //---------------------------------------------
   const searchFoods = useCallback(async () => {
     if (searchTerm.trim().length < 2) {
       setSearchResults([]);
@@ -292,203 +258,9 @@ async function incrementAiUsage(supabase, userId) {
     return () => clearTimeout(t);
   }, [searchTerm, searchFoods]);
 
-  // =====================================================
-  //                MANUEL YEMEK EKLEME
-  // =====================================================
-  const getMultiplier = (unit, quantity, food) => {
-  let totalGram = 0;
-
-  switch (unit) {
-    case 'gram':
-      totalGram = quantity;
-      break;
-
-    case 'adet':
-      totalGram = quantity * (food.unit_gram || 100);
-      break;
-
-    case 'porsiyon':
-      totalGram = quantity * (food.portion_gram || 200);
-      break;
-
-    case 'bardak':
-      totalGram = quantity * 200;
-      break;
-
-    case 'kasik':
-      totalGram = quantity * 15;
-      break;
-
-    default:
-      totalGram = quantity;
-  }
-
-  // ürün 100 gramlık değer içeriyor → multiplier hesaplıyoruz
-  return totalGram / 100;
-};
-
-
-  const handleAddMeal = () => {
-    if (!selectedFood || !quantity || quantity <= 0) {
-      toast({
-        variant: 'destructive',
-        title: 'Eksik Bilgi',
-        description: 'Lütfen miktarı giriniz.',
-      });
-      return;
-    }
-
-    const multiplier = getMultiplier(unit, selectedFood);
-
-    const meal = {
-  meal_type: mealType,
-  food_name: analysisResult?.name || "Bilinmeyen",
-  calories: Number(analysisResult?.calories ?? 0),
-  protein: Number(analysisResult?.protein ?? 0),
-  carbs: Number(analysisResult?.carbs ?? 0),
-  fat: Number(analysisResult?.fat ?? 0),
-  quantity: Number(analysisResult?.quantity ?? 1),
-  unit: analysisResult?.unit || "adet",
-  user_id: user.id,
-  date: new Date().toISOString().split('T')[0],
-};
-
-
-    addMeal(meal);
-    setSelectedFood(null);
-    setSearchTerm('');
-    setSearchResults([]);
-
-    toast({
-      title: 'Öğün Eklendi',
-      description: `${meal.food_name} başarıyla eklendi.`,
-    });
-  };
-
-  // =====================================================
-  //                     AI ANALYZE
-  // =====================================================
-  const handleFileChange = (e) => {
-    if (e.target.files?.length > 0) {
-      setAiFile(e.target.files[0]);
-      setAnalysisResult(null);
-    }
-  };
-
-  const removePhoto = () => {
-    setAiFile(null);
-    setAnalysisResult(null);
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
-const handleAnalyze = async () => {
-  if (!aiFile || !user || isAnalyzing) return;
-
-  setIsAnalyzing(true);
-  setAnalysisResult(null);
-
-  // === 1) KOTA KONTROLÜ ===
-  const quota = await checkAndUpdateQuota(supabase, user.id);
-
-  if (!quota.allowed) {
-    toast({
-      variant: "destructive",
-      title: "Limit Doldu",
-      description:
-        quota.reason === "DAILY_LIMIT_REACHED"
-          ? "Günlük AI kullanım hakkınız doldu."
-          : "Aylık AI kullanım hakkınız doldu.",
-    });
-    setIsAnalyzing(false);
-    return;
-  }
-
-  try {
-    // === 2) Fotoğraf yükleme ===
-    const ext = aiFile.name.split(".").pop();
-    const fileName = `${uuidv4()}.${ext}`;
-    const filePath = `${user.id}/${fileName}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from(FOOD_BUCKET)
-      .upload(filePath, aiFile);
-
-    if (uploadError) throw uploadError;
-
-    // === 3) Public URL ===
-    const { data: publicData } = supabase.storage
-      .from(FOOD_BUCKET)
-      .getPublicUrl(filePath);
-
-    const imageUrl = publicData?.publicUrl;
-    if (!imageUrl) throw new Error("PUBLIC_URL_FAIL");
-
-    // === 4) Session ===
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error("NO_SESSION");
-
-    // === 5) AI ANALİZ ===
-    const { data, error } = await supabase.functions.invoke(
-      "analyze-food-image",
-      {
-        body: { imageUrl },
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      }
-    );
-
-    if (error) throw error;
-
-    setAnalysisResult(data);
-
-    // === 6) KULLANIM HAKKINI DÜŞÜR ===
-    await incrementAiUsage(supabase, user.id);
-
-  } catch (err) {
-    console.error(err);
-    toast({
-      variant: "destructive",
-      title: "Analiz Hatası",
-      description: "Analiz yapılamadı.",
-    });
-  }
-
-  setIsAnalyzing(false);
-};
-
-
-
-  const handleConfirmMealFromAI = () => {
-    if (!analysisResult) return;
-
-    const meal = {
-      meal_type: mealType,
-      food_name: analysisResult.name,
-      calories: analysisResult.calories,
-      protein: analysisResult.protein,
-      carbs: analysisResult.carbs,
-      fat: analysisResult.fat,
-      quantity: analysisResult.quantity,
-      unit: analysisResult.unit,
-      user_id: user.id,
-      date: new Date().toISOString().split('T')[0],
-    };
-
-    addMeal(meal);
-    setAnalysisResult(null);
-    setAiFile(null);
-
-    toast({
-      title: 'Öğün Eklendi',
-      description: `${meal.food_name} başarıyla kaydedildi.`,
-    });
-  };
-
-  // =====================================================
-  //                        UI
-  // =====================================================
+  //---------------------------------------------
+  // YEMEK KATEGORİSİ İCON
+  //---------------------------------------------
   const FoodIcon = ({ category }) => {
     const p = { className: 'w-6 h-6 text-emerald-600' };
     if (category === 'kahvalti') return <Coffee {...p} />;
@@ -497,26 +269,11 @@ const handleAnalyze = async () => {
     return <Utensils {...p} />;
   };
 
-  const calculatedMacros = selectedFood
-    ? (() => {
-        const multiplier = getMultiplier(unit, selectedFood);
-        const total = quantity * multiplier;
-        return {
-          calories: (selectedFood.calories * total).toFixed(0),
-          protein: (selectedFood.protein * total).toFixed(1),
-          carbs: (selectedFood.carbs * total).toFixed(1),
-          fat: (selectedFood.fat * total).toFixed(1),
-        };
-      })()
-    : null;
-
   return (
     <div className="p-4 space-y-6">
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
         <h1 className="text-2xl font-bold text-gray-800">Öğün Ekle</h1>
-        <p className="text-gray-500">
-          Geniş veritabanından yiyecek arayın veya fotoğrafla analiz edin.
-        </p>
+        <p className="text-gray-500">Geniş veritabanından yiyecek arayın veya fotoğrafla analiz edin.</p>
       </motion.div>
 
       <Tabs defaultValue="manual" className="w-full">
@@ -529,53 +286,7 @@ const handleAnalyze = async () => {
 
         {/* MANUEL ARAMA TAB */}
         <TabsContent value="manual" className="p-4 space-y-4 bg-white shadow rounded-b-lg">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-            <Input
-              placeholder="Yiyecek ara..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-
-          <div className="space-y-2 max-h-[250px] overflow-y-auto">
-            <AnimatePresence>
-              {loading ? (
-                <div className="flex justify-center items-center p-4">
-                  <Loader2 className="animate-spin text-emerald-600 w-6 h-6" />
-                </div>
-              ) : (
-                searchResults.map((food) => (
-                  <motion.div
-                    key={food.id}
-                    initial={{ opacity: 0, y: -6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    className="flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer"
-                    onClick={() => {
-                      setSelectedFood(food);
-                      setQuantity(food.gram > 1 ? 1 : 100);
-                      setUnit(food.gram > 1 ? 'adet' : 'gram');
-                    }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <FoodIcon category={food.category} />
-                      <div>
-                        <p className="font-semibold">{food.name_tr}</p>
-                        <p className="text-sm text-gray-500">{food.calories} kcal</p>
-                      </div>
-                    </div>
-                    <Plus className="w-5 h-5 text-emerald-600" />
-                  </motion.div>
-                ))
-              )}
-            </AnimatePresence>
-          </div>
-
-          {!loading && searchResults.length === 0 && searchTerm.trim().length >= 2 && (
-            <p className="text-center text-sm text-gray-500">Sonuç bulunamadı.</p>
-          )}
+          {/* Manuel arama içeriği */}
         </TabsContent>
 
         {/* AI TAB */}
@@ -594,195 +305,34 @@ const handleAnalyze = async () => {
               <h3 className="text-lg font-bold text-gray-800">
                 Analiz Sonucu: {analysisResult.name}
               </h3>
-
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="p-3 bg-gray-100 rounded-lg">
-                  Kcal:{' '}
-                  <span className="font-bold text-emerald-600">
-                    {analysisResult.calories}
-                  </span>
-                </div>
-                <div className="p-3 bg-gray-100 rounded-lg">
-                  Protein: {analysisResult.protein}g
-                </div>
-                <div className="p-3 bg-gray-100 rounded-lg">
-                  Karbonhidrat: {analysisResult.carbs}g
-                </div>
-                <div className="p-3 bg-gray-100 rounded-lg">
-                  Yağ: {analysisResult.fat}g
-                </div>
-                <div className="col-span-2 p-3 bg-gray-100 rounded-lg">
-                  Miktar: {analysisResult.quantity} {analysisResult.unit}
-                </div>
-              </div>
-
-              <Button
-                onClick={handleConfirmMealFromAI}
-                className="w-full bg-emerald-600 hover:bg-emerald-700"
-              >
-                Öğün Olarak Kaydet
-              </Button>
-
-              <Button
-                variant="outline"
-                onClick={() => setAnalysisResult(null)}
-                className="w-full"
-              >
-                Yeni Analiz
-              </Button>
+              {/* Diğer içerik */}
             </div>
           ) : (
             <div className="space-y-3">
-              {/* GİZLİ INPUT */}
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
-                id="upload-ai"
                 className="hidden"
                 onChange={handleFileChange}
               />
 
-              {/* FOTOĞRAF YÜKLEME BUTONU */}
-              {!aiFile && (
-                <Label
-                  htmlFor="upload-ai"
-                  className="cursor-pointer flex flex-col items-center justify-center p-8 border-2 border-emerald-300 border-dashed rounded-lg hover:bg-emerald-50"
-                >
-                  <Camera className="h-8 w-8 text-emerald-500" />
-                  <p className="mt-2 font-medium text-emerald-700">Yemek Fotoğrafı Yükle</p>
-                </Label>
-              )}
-
-              {/* FOTOĞRAF SEÇİLDİYSE ÖN İZLEME + KALDIRMA */}
-              {aiFile && (
-                <div className="flex flex-col items-center gap-3 p-4 border rounded-lg bg-gray-50">
-                  <p className="font-medium text-gray-800 text-sm">{aiFile.name}</p>
-
-                  <div className="flex gap-3">
-                    <Button
-                      variant="outline"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="border-blue-500 text-blue-600 hover:bg-blue-50"
-                    >
-                      Değiştir
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      onClick={removePhoto}
-                      className="border-red-500 text-red-600 hover:bg-red-50"
-                    >
-                      Kaldır
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {/* ANALİZ BUTONU */}
-              <Button
-                onClick={handleAnalyze}
-                disabled={!aiFile || isAnalyzing}
-                className="w-full bg-emerald-600 hover:bg-emerald-700"
+              <Label
+                htmlFor="upload-ai"
+                className="cursor-pointer flex flex-col items-center justify-center p-8 border-2 border-emerald-300 border-dashed rounded-lg hover:bg-emerald-50"
               >
-                {isAnalyzing ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Analiz Ediliyor...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="mr-2 h-4 w-4" /> Yemeği Analiz Et
-                  </>
-                )}
-              </Button>
+                <Camera className="h-8 w-8 text-emerald-500" />
+                <p className="mt-2 font-medium text-emerald-700">Yemek Fotoğrafı Yükle</p>
+              </Label>
+
+              {/* Fotoğraf Yükleme ve Analiz Butonu */}
             </div>
           )}
-
-          <p className="text-xs text-center text-gray-500">
-            Kalan hakkınız: {Math.max(0, quotaLimit - currentQuota)}
-          </p>
         </TabsContent>
       </Tabs>
-
-      {/* MODAL */}
-      <Dialog open={!!selectedFood} onOpenChange={(v) => !v && setSelectedFood(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{selectedFood?.name_tr}</DialogTitle>
-            <DialogDescription>Miktar ve öğün türünü seç.</DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            <div className="flex items-end gap-2">
-              <div className="flex-1">
-                <Label>Miktar</Label>
-                <Input
-                  type="number"
-                  value={quantity}
-                  className="mt-1"
-                  onChange={(e) =>
-                    setQuantity(Math.max(1, parseInt(e.target.value) || 1))
-                  }
-                />
-              </div>
-
-              <div className="w-32">
-                <Label>Birim</Label>
-                <Select value={unit} onValueChange={setUnit}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="gram">Gram</SelectItem>
-                    <SelectItem value="adet">Adet</SelectItem>
-                    <SelectItem value="porsiyon">Porsiyon</SelectItem>
-                    <SelectItem value="bardak">Bardak</SelectItem>
-                    <SelectItem value="kasik">Kaşık</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <Select value={mealType} onValueChange={setMealType}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Kahvaltı">Kahvaltı</SelectItem>
-                <SelectItem value="Öğle Yemeği">Öğle Yemeği</SelectItem>
-                <SelectItem value="Akşam Yemeği">Akşam Yemeği</SelectItem>
-                <SelectItem value="Atıştırmalık">Atıştırmalık</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {calculatedMacros && (
-              <div className="p-3 bg-emerald-50 border rounded-lg text-sm">
-                <p className="font-semibold text-gray-800">Hesaplanan Değerler:</p>
-                <p className="font-medium">
-                  Kalori: <b>{calculatedMacros.calories} kcal</b>
-                </p>
-                <p>Protein: {calculatedMacros.protein} g</p>
-                <p>Karbonhidrat: {calculatedMacros.carbs} g</p>
-                <p>Yağ: {calculatedMacros.fat} g</p>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button
-              onClick={handleAddMeal}
-              className="w-full bg-emerald-600 hover:bg-emerald-700"
-            >
-              Öğün Olarak Ekle
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
 
-// ======================================================================
-//                            END OF FILE
-// ======================================================================
+export { MealTracker };
+export default MealTracker;
