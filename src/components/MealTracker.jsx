@@ -334,5 +334,4 @@ export const MealTracker = ({ addMeal }) => {
   );
 };
 
-export { MealTracker };
 export default MealTracker;
