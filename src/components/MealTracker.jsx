@@ -67,10 +67,15 @@ const isQuotaReached = currentQuota >= quotaLimit;
 // PLAN LİMİTLERİ
 //---------------------------------------------
 const PLAN_LIMITS = {
-  free: { daily: 3, monthly: 3 },
-  basic: { daily: 10, monthly: 30 },
-  pro: { daily: 20, monthly: 60 },
-  kapsamli: { daily: 35, monthly: 1000 },
+  free: { daily: 3, monthly: 3 },
+  basic: { daily: 10, monthly: 30 },
+  pro: { daily: 20, monthly: 60 },
+  kapsamli: { daily: 99999, monthly: 99999 },
+
+  // --- GOOGLE PLAY IDLERİ ---
+  "sub_premium_monthly": { daily: 30, monthly: 1000 },
+  "sub_pro_monthly": { daily: 50, monthly: 2000 },
+  "sub_unlimited_monthly": { daily: 99999, monthly: 99999 }
 };
 
 //---------------------------------------------
@@ -144,11 +149,16 @@ async function checkAndUpdateQuota(supabase, userId) {
 
   // PLAN LİMİTLERİ
   const planLimits = {
-    free: { daily: 0, monthly: 3 },
-    basic: { daily: 10, monthly: 30 },
-    pro: { daily: 20, monthly: 60 },
-    kapsamli: { daily: 35, monthly: 1000 },
-  };
+    free: { daily: 3, monthly: 3 }, // Burayı 0'dan 3'e çektim ki hata olsa bile çalışsın
+    basic: { daily: 10, monthly: 30 },
+    pro: { daily: 20, monthly: 60 },
+    kapsamli: { daily: 99999, monthly: 99999 }, // Kapsamlıyı artırdım
+    
+    // --- BURASI EKSİKTİ ---
+    "sub_premium_monthly": { daily: 30, monthly: 1000 },
+    "sub_pro_monthly": { daily: 50, monthly: 2000 },
+    "sub_unlimited_monthly": { daily: 99999, monthly: 99999 } // <-- SENİN PLANIN BU
+  };
 
   const limits = planLimits[user.plan_tier] || planLimits.free;
 
