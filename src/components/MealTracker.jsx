@@ -1,9 +1,8 @@
 // ======================================================================
-// MealTracker.jsx — FULL VERSION (UI KORUNDU + AI & QUOTA FIX)
-// ======================================================================
-// ⚠️ Bu dosya SENİN MEVCUT UI'INI KORUR
-// ⚠️ Sadece AI quota + plan + analyze bug fix eklendi
-// ⚠️ Manuel ekleme, budget, tabs, iconlar GERİ GELDİ
+// MealTracker.jsx — FINAL TAM DÜZELTİLMİŞ HAL
+// - UI KORUNDU
+// - AI + QUOTA FIX
+// - EXPORT / BUILD HATASI FIX
 // ======================================================================
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -47,7 +46,7 @@ import { v4 as uuidv4 } from 'uuid';
 const FOOD_BUCKET = 'food-images';
 
 // =====================================================
-// PLAN LIMITS (TEK GERÇEK KAYNAK)
+// PLAN LIMITS
 // =====================================================
 const PLAN_LIMITS = {
   free: { daily: 3 },
@@ -56,13 +55,13 @@ const PLAN_LIMITS = {
   sub_unlimited_monthly: { daily: 99999 },
 };
 
-export default function MealTracker({ addMeal }) {
+// =====================================================
+// COMPONENT
+// =====================================================
+function MealTracker({ addMeal }) {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  // ==========================
-  // UI STATE (ESKİ HALİ)
-  // ==========================
   const [activeTab, setActiveTab] = useState('manual');
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -72,16 +71,14 @@ export default function MealTracker({ addMeal }) {
   const [unit, setUnit] = useState('gram');
   const [mealType, setMealType] = useState('Kahvaltı');
 
-  // ==========================
-  // AI STATE
-  // ==========================
+  // AI
   const fileInputRef = useRef(null);
   const [aiFile, setAiFile] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
 
   // =====================================================
-  // MANUEL YİYECEK ARAMA (ESKİSİ GİBİ)
+  // MANUEL ARAMA
   // =====================================================
   const searchFoods = useCallback(async () => {
     if (searchTerm.length < 2) {
@@ -106,7 +103,7 @@ export default function MealTracker({ addMeal }) {
   }, [searchFoods]);
 
   // =====================================================
-  // AI ANALYZE — UI BOZULMADAN FIX
+  // AI ANALYZE
   // =====================================================
   const handleAnalyze = async () => {
     if (!user || !aiFile || isAnalyzing) return;
@@ -121,11 +118,11 @@ export default function MealTracker({ addMeal }) {
         .single();
 
       const today = new Date().toISOString().split('T')[0];
-      let dailyUsed = profile.ai_daily_used || 0;
+      let dailyUsed = profile?.ai_daily_used || 0;
 
-      if (profile.ai_last_use_date !== today) dailyUsed = 0;
+      if (profile?.ai_last_use_date !== today) dailyUsed = 0;
 
-      const limit = PLAN_LIMITS[profile.plan_tier]?.daily ?? 3;
+      const limit = PLAN_LIMITS[profile?.plan_tier] ?? PLAN_LIMITS.free.daily;
 
       if (dailyUsed >= limit) {
         toast({
@@ -145,7 +142,7 @@ export default function MealTracker({ addMeal }) {
         .from(FOOD_BUCKET)
         .getPublicUrl(path);
 
-      const imageUrl = urlData.publicUrl;
+      const imageUrl = urlData?.publicUrl;
 
       const { data: { session } } = await supabase.auth.getSession();
 
@@ -175,7 +172,7 @@ export default function MealTracker({ addMeal }) {
   };
 
   // =====================================================
-  // UI (TAM HALİ — HİÇBİR ŞEY SİLİNMEDİ)
+  // UI
   // =====================================================
   return (
     <div className="p-4 space-y-4">
@@ -185,7 +182,6 @@ export default function MealTracker({ addMeal }) {
           <TabsTrigger value="ai">AI</TabsTrigger>
         </TabsList>
 
-        {/* ================= MANUEL ================= */}
         <TabsContent value="manual" className="space-y-4">
           <Input
             placeholder="Yiyecek ara..."
@@ -210,7 +206,6 @@ export default function MealTracker({ addMeal }) {
           </AnimatePresence>
         </TabsContent>
 
-        {/* ================= AI ================= */}
         <TabsContent value="ai" className="space-y-4">
           <input
             ref={fileInputRef}
@@ -240,6 +235,8 @@ export default function MealTracker({ addMeal }) {
   );
 }
 
-// ======================================================================
-// END OF FILE
-// ======================================================================
+// =====================================================
+// EXPORTS (BUILD FIX)
+// =====================================================
+export { MealTracker };
+export default MealTracker;
