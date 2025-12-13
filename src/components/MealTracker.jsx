@@ -1,233 +1,184 @@
-// ======================================================================
-// MealTracker.jsx — FINAL TAM DÜZELTİLMİŞ HAL
-// - UI KORUNDU
-// - AI + QUOTA FIX
-// - EXPORT / BUILD HATASI FIX
-// ======================================================================
+// FINAL FIXED MealTracker.jsx
+// - Eski yapıyı korur
+// - Manuel + AI akışı TAM
+// - Mobile image upload + OpenAI uyumlu
+// - Export / build hatası yok
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Camera, Plus, Loader2, Zap } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog';
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-} from '@/components/ui/tabs';
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from '@/components/ui/select';
-import {
-  Search,
-  Plus,
-  Utensils,
-  Camera,
-  Zap,
-  Loader2,
-} from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { v4 as uuidv4 } from 'uuid';
 
 const FOOD_BUCKET = 'food-images';
 
-// =====================================================
-// PLAN LIMITS
-// =====================================================
 const PLAN_LIMITS = {
-  free: { daily: 3 },
-  sub_premium_monthly: { daily: 30 },
-  sub_pro_monthly: { daily: 50 },
-  sub_unlimited_monthly: { daily: 99999 },
+  free: 3,
+  basic: 10,
+  pro: 30,
+  kapsamli: 99999,
 };
 
-// =====================================================
-// COMPONENT
-// =====================================================
 function MealTracker({ addMeal }) {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const [activeTab, setActiveTab] = useState('manual');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
+  const [tab, setTab] = useState('manual');
+  const [query, setQuery] = useState('');
+  const [foods, setFoods] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [selectedFood, setSelectedFood] = useState(null);
-  const [quantity, setQuantity] = useState(100);
-  const [unit, setUnit] = useState('gram');
-  const [mealType, setMealType] = useState('Kahvaltı');
 
-  // AI
-  const fileInputRef = useRef(null);
-  const [aiFile, setAiFile] = useState(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState(null);
+  const fileRef = useRef(null);
+  const [image, setImage] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [aiResult, setAiResult] = useState(null);
 
-  // =====================================================
-  // MANUEL ARAMA
-  // =====================================================
-  const searchFoods = useCallback(async () => {
-    if (searchTerm.length < 2) {
-      setSearchResults([]);
+  // ---------------- MANUAL SEARCH ----------------
+  useEffect(() => {
+    if (query.length < 2) {
+      setFoods([]);
       return;
     }
 
-    setLoading(true);
-    const { data } = await supabase
-      .from('foods')
-      .select('*')
-      .ilike('name_tr', `%${searchTerm}%`)
-      .limit(20);
+    const t = setTimeout(async () => {
+      setLoading(true);
+      const { data } = await supabase
+        .from('foods')
+        .select('*')
+        .ilike('name_tr', `%${query}%`)
+        .limit(20);
+      setFoods(data || []);
+      setLoading(false);
+    }, 300);
 
-    setSearchResults(data || []);
-    setLoading(false);
-  }, [searchTerm]);
-
-  useEffect(() => {
-    const t = setTimeout(searchFoods, 300);
     return () => clearTimeout(t);
-  }, [searchFoods]);
+  }, [query]);
 
-  // =====================================================
-  // AI ANALYZE
-  // =====================================================
-  const handleAnalyze = async () => {
-    if (!user || !aiFile || isAnalyzing) return;
+  // ---------------- AI ANALYZE ----------------
+  const analyzeImage = async () => {
+    if (!image || !user) return;
 
     try {
-      setIsAnalyzing(true);
+      setAnalyzing(true);
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('plan_tier, ai_daily_used, ai_last_use_date')
+        .select('plan_tier, ai_usage_count, ai_usage_last_reset')
         .eq('id', user.id)
         .single();
 
       const today = new Date().toISOString().split('T')[0];
-      let dailyUsed = profile?.ai_daily_used || 0;
+      let used = profile.ai_usage_last_reset === today ? profile.ai_usage_count : 0;
+      const limit = PLAN_LIMITS[profile.plan_tier || 'free'];
 
-      if (profile?.ai_last_use_date !== today) dailyUsed = 0;
-
-      const limit = PLAN_LIMITS[profile?.plan_tier] ?? PLAN_LIMITS.free.daily;
-
-      if (dailyUsed >= limit) {
+      if (used >= limit) {
         toast({
           variant: 'destructive',
-          title: 'Günlük AI Limiti Doldu',
-          description: `Günlük hakkınız: ${limit}`,
+          title: 'AI Limiti Doldu',
+          description: `Günlük limit: ${limit}`,
         });
         return;
       }
 
-      const ext = aiFile.name.split('.').pop();
+      // mobile SAFE upload
+      const ext = image.name.split('.').pop();
       const path = `${user.id}/${uuidv4()}.${ext}`;
 
-      await supabase.storage.from(FOOD_BUCKET).upload(path, aiFile);
-
-      const { data: urlData } = supabase.storage
-        .from(FOOD_BUCKET)
-        .getPublicUrl(path);
-
-      const imageUrl = urlData?.publicUrl;
-
-      const { data: { session } } = await supabase.auth.getSession();
-
-      const { data, error } = await supabase.functions.invoke('analyze-food-image', {
-        body: { imageUrl },
-        headers: { Authorization: `Bearer ${session.access_token}` },
+      await supabase.storage.from(FOOD_BUCKET).upload(path, image, {
+        contentType: image.type,
+        upsert: false,
       });
 
-      if (error) throw error;
+      const { data: urlData } = supabase.storage.from(FOOD_BUCKET).getPublicUrl(path);
 
-      setAnalysisResult(data);
+      const { data: sessionData } = await supabase.auth.getSession();
 
-      await supabase
-        .from('profiles')
-        .update({
-          ai_daily_used: dailyUsed + 1,
-          ai_last_use_date: today,
-        })
-        .eq('id', user.id);
+      const res = await supabase.functions.invoke('analyze-food-image', {
+        body: { imageUrl: urlData.publicUrl },
+        headers: {
+          Authorization: `Bearer ${sessionData.session.access_token}`,
+        },
+      });
 
-    } catch (err) {
-      console.error(err);
-      toast({ variant: 'destructive', title: 'AI Analiz Hatası' });
+      if (res.error) throw res.error;
+
+      setAiResult(res.data);
+
+      await supabase.from('profiles').update({
+        ai_usage_count: used + 1,
+        ai_usage_last_reset: today,
+      }).eq('id', user.id);
+
+    } catch (e) {
+      console.error(e);
+      toast({ variant: 'destructive', title: 'AI Analiz Başarısız' });
     } finally {
-      setIsAnalyzing(false);
+      setAnalyzing(false);
     }
   };
 
-  // =====================================================
-  // UI
-  // =====================================================
+  // ---------------- UI ----------------
   return (
     <div className="p-4 space-y-4">
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="grid grid-cols-2">
           <TabsTrigger value="manual">Manuel</TabsTrigger>
           <TabsTrigger value="ai">AI</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="manual" className="space-y-4">
+        <TabsContent value="manual">
           <Input
             placeholder="Yiyecek ara..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
           />
 
-          {loading && <p>Yükleniyor...</p>}
+          {loading && <p className="text-sm">Yükleniyor...</p>}
 
           <AnimatePresence>
-            {searchResults.map((food) => (
+            {foods.map((f) => (
               <motion.div
-                key={food.id}
+                key={f.id}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-3 border rounded-lg flex justify-between"
+                className="p-3 border rounded-xl flex justify-between mt-2"
               >
-                <span>{food.name_tr}</span>
-                <Button size="sm" onClick={() => addMeal(food)}>Ekle</Button>
+                <span>{f.name_tr}</span>
+                <Button size="sm" onClick={() => addMeal(f)}>
+                  <Plus className="w-4 h-4" />
+                </Button>
               </motion.div>
             ))}
           </AnimatePresence>
         </TabsContent>
 
-        <TabsContent value="ai" className="space-y-4">
+        <TabsContent value="ai" className="space-y-3">
           <input
-            ref={fileInputRef}
+            ref={fileRef}
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={(e) => setAiFile(e.target.files?.[0] || null)}
+            onChange={(e) => setImage(e.target.files?.[0])}
           />
 
-          <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
-            <Camera className="mr-2" /> Fotoğraf Yükle
+          <Button variant="outline" onClick={() => fileRef.current.click()}>
+            <Camera className="mr-2" /> Fotoğraf Seç
           </Button>
 
-          <Button onClick={handleAnalyze} disabled={!aiFile || isAnalyzing}>
-            {isAnalyzing ? <Loader2 className="animate-spin mr-2" /> : <Zap className="mr-2" />}
+          <Button onClick={analyzeImage} disabled={!image || analyzing}>
+            {analyzing ? <Loader2 className="animate-spin mr-2" /> : <Zap className="mr-2" />}
             Analiz Et
           </Button>
 
-          {analysisResult && (
-            <div className="p-4 border rounded-lg">
-              <pre className="text-xs">{JSON.stringify(analysisResult, null, 2)}</pre>
-            </div>
+          {aiResult && (
+            <pre className="text-xs bg-black/80 text-white p-3 rounded-xl overflow-x-auto">
+              {JSON.stringify(aiResult, null, 2)}
+            </pre>
           )}
         </TabsContent>
       </Tabs>
@@ -235,8 +186,5 @@ function MealTracker({ addMeal }) {
   );
 }
 
-// =====================================================
-// EXPORTS (BUILD FIX)
-// =====================================================
-export { MealTracker };
 export default MealTracker;
+export { MealTracker };
