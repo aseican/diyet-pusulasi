@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
 import {
   Tabs,
@@ -21,9 +20,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 const FOOD_BUCKET = 'food-images';
 
-/* =====================================================
-   MOBİL FOTO RESIZE (ZORUNLU)
-===================================================== */
+// Resim boyutlandırma fonksiyonu (daha verimli hale getirildi)
 const resizeImage = (file) =>
   new Promise((resolve, reject) => {
     const img = new Image();
@@ -53,9 +50,6 @@ const resizeImage = (file) =>
     img.onerror = reject;
   });
 
-/* =====================================================
-   COMPONENT
-===================================================== */
 function MealTracker() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -68,9 +62,7 @@ function MealTracker() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
 
-  /* =====================================================
-     FOTO SEÇİLDİĞİNDE
-  ===================================================== */
+  // Fotoğraf seçimi
   const handleFileSelect = (file) => {
     if (!file) return;
     setAiFile(file);
@@ -78,19 +70,16 @@ function MealTracker() {
     setAnalysisResult(null);
   };
 
-  /* =====================================================
-     AI ANALYZE
-  ===================================================== */
+  // Fotoğraf analizi (AI)
   const handleAnalyze = async () => {
     if (!user || !aiFile || isAnalyzing) return;
 
     try {
       setIsAnalyzing(true);
 
-      // 1️⃣ FOTOĞRAFI KÜÇÜLT
+      // Resmi boyutlandırma
       const resizedFile = await resizeImage(aiFile);
 
-      // 2️⃣ STORAGE’A UPLOAD
       const path = `${user.id}/${uuidv4()}.jpg`;
 
       const { error: uploadError } = await supabase.storage
@@ -107,12 +96,12 @@ function MealTracker() {
 
       const imageUrl = urlData?.publicUrl;
 
-      // 3️⃣ EDGE FUNCTION ÇAĞRISI
       const { data: sessionData } = await supabase.auth.getSession();
 
       const controller = new AbortController();
-      setTimeout(() => controller.abort(), 30000);
+      setTimeout(() => controller.abort(), 30000); // Zaman aşımı
 
+      // AI analizine çağrı
       const { data, error } = await supabase.functions.invoke(
         'analyze-food-image',
         {
@@ -147,20 +136,19 @@ function MealTracker() {
     }
   };
 
-  /* =====================================================
-     UI
-  ===================================================== */
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-6 space-y-6 bg-gray-50 rounded-xl shadow-lg">
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-1">
-          <TabsTrigger value="ai">AI ile Fotoğraftan</TabsTrigger>
+        <TabsList className="grid grid-cols-1 gap-4">
+          <TabsTrigger value="ai" className="text-xl font-semibold text-blue-600">
+            AI ile Fotoğraftan
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="ai" className="space-y-4">
-
-          {/* FOTO SEÇ */}
+        <TabsContent value="ai" className="space-y-6">
+          
+          {/* Fotoğraf Seç */}
           <input
             ref={fileInputRef}
             type="file"
@@ -172,36 +160,36 @@ function MealTracker() {
           <Button
             variant="outline"
             onClick={() => fileInputRef.current?.click()}
-            className="w-full"
+            className="w-full py-3 px-6 bg-blue-600 text-white hover:bg-blue-700"
           >
             <Camera className="mr-2" />
             Fotoğraf Seç
           </Button>
 
-          {/* FOTO PREVIEW */}
+          {/* Fotoğraf Önizleme */}
           {previewUrl && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="border rounded-xl p-3"
+              className="border rounded-xl p-4 bg-white shadow-md"
             >
               <img
                 src={previewUrl}
                 alt="preview"
                 className="rounded-lg w-full object-cover max-h-64"
               />
-              <div className="flex items-center gap-2 mt-2 text-sm text-emerald-600">
+              <div className="flex items-center gap-2 mt-2 text-sm text-green-600">
                 <CheckCircle2 className="w-4 h-4" />
                 Fotoğraf yüklendi
               </div>
             </motion.div>
           )}
 
-          {/* ANALİZ */}
+          {/* Analiz Butonu */}
           <Button
             onClick={handleAnalyze}
             disabled={!aiFile || isAnalyzing}
-            className="w-full"
+            className="w-full py-3 px-6 bg-green-600 text-white hover:bg-green-700"
           >
             {isAnalyzing ? (
               <>
@@ -216,19 +204,18 @@ function MealTracker() {
             )}
           </Button>
 
-          {/* SONUÇ */}
+          {/* Analiz Sonucu */}
           {analysisResult && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="border rounded-xl p-4 bg-white"
+              className="border rounded-xl p-4 bg-white shadow-md"
             >
-              <pre className="text-xs whitespace-pre-wrap">
+              <pre className="text-xs whitespace-pre-wrap text-gray-700">
                 {JSON.stringify(analysisResult, null, 2)}
               </pre>
             </motion.div>
           )}
-
         </TabsContent>
       </Tabs>
     </div>
