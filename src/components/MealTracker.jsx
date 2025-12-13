@@ -1,5 +1,6 @@
 // ======================================================================
 //                        FULL & WORKING MealTracker.jsx
+//                 (Native picker + 0-byte fix integrated)
 // ======================================================================
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
@@ -36,24 +37,22 @@ export const MealTracker = ({ addMeal }) => {
   const { user, userData } = useAuth();
 
   // AI kota UI hesapları (sadece görsel gösterim için)
- const planLimitsForUi = {
-    free: { daily: 3 }, 
-    basic: { daily: 10 },
-    pro: { daily: 20 },
-    kapsamli: { daily: 99999 },
+  const planLimitsForUi = {
+    free: { daily: 3 },
+    basic: { daily: 10 },
+    pro: { daily: 20 },
+    kapsamli: { daily: 99999 },
     Kapsamlı: { daily: 99999 },
     sub_unlimited_monthly: { daily: 99999 },
-    // EKLENEN KISIM:
     "sub_premium_monthly": { daily: 30 },
     "sub_pro_monthly": { daily: 50 },
-    "sub_unlimited_monthly": { daily: 99999 } // <-- Senin planın
-  };
-// Kullanıcının planını al (yoksa free say)
-const currentPlan = userData?.plan_tier || 'free';
-const quotaLimit = planLimitsForUi[currentPlan]?.daily ?? planLimitsForUi.free.daily;
-const currentQuota = Number(userData?.ai_daily_used ?? 0);
-const isQuotaReached = currentQuota >= quotaLimit;
+    "sub_unlimited_monthly": { daily: 99999 }
+  };
 
+  const currentPlan = userData?.plan_tier || 'free';
+  const quotaLimit = planLimitsForUi[currentPlan]?.daily ?? planLimitsForUi.free.daily;
+  const currentQuota = Number(userData?.ai_daily_used ?? 0);
+  const isQuotaReached = currentQuota >= quotaLimit;
 
   // STATE'LER
   const [searchTerm, setSearchTerm] = useState('');
@@ -81,14 +80,12 @@ const isQuotaReached = currentQuota >= quotaLimit;
     const line = typeof data === "undefined"
       ? `[${ts}] ${label}`
       : `[${ts}] ${label} ${(() => {
-          try { return JSON.stringify(data); } catch { return String(data); }
-        })()}`;
+        try { return JSON.stringify(data); } catch { return String(data); }
+      })()}`;
 
-    // Console (works on desktop + remote debugging)
     // eslint-disable-next-line no-console
     console.log(line);
 
-    // On-screen (works even when you can't access console on mobile)
     setAiDebugLogs((prev) => {
       const next = [...prev, line];
       return next.length > 200 ? next.slice(next.length - 200) : next;
@@ -107,6 +104,71 @@ const isQuotaReached = currentQuota >= quotaLimit;
       toast({ variant: "destructive", title: "Kopyalanamadı", description: "Panoya kopyalanamadı (izin engeli olabilir)." });
     }
   }, [aiDebugLogs, toast]);
+
+  // =====================================================
+  // Native (Android WebView) picker integration
+  // =====================================================
+  const isNativePickerAvailable = typeof window !== "undefined"
+    && !!window.NativeImage
+    && typeof window.NativeImage.pickImageFromGallery === "function";
+
+  useEffect(() => {
+    // Android native tarafı base64 + mime döndürecek.
+    // MainActivity.kt: window.__nativeImagePickResult(b64, mime) çağırıyor.
+    window.__nativeImagePickResult = (b64, mime) => {
+      try {
+        if (!b64) {
+          debugLog("Native pick cancelled / empty");
+          return;
+        }
+
+        const byteChars = atob(b64);
+        const byteNumbers = new Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) {
+          byteNumbers[i] = byteChars.charCodeAt(i);
+        }
+
+        const blob = new Blob([new Uint8Array(byteNumbers)], {
+          type: mime || "image/jpeg",
+        });
+
+        const ext = (mime?.split("/")?.[1] || "jpg").toLowerCase();
+        const file = new File([blob], `native_photo.${ext}`, {
+          type: mime || "image/jpeg",
+        });
+
+        debugLog("Native file constructed", { name: file.name, type: file.type, size: file.size });
+
+        setAiFile(file);
+        setAnalysisResult(null);
+
+        // input'u temizleyelim (web fallback karışmasın)
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      } catch (e) {
+        debugLog("Native pick decode failed", { message: e?.message, name: e?.name });
+        toast({
+          variant: "destructive",
+          title: "Fotoğraf Hatası",
+          description: "Fotoğraf alınamadı. (Native dönüşüm hatası)",
+        });
+      }
+    };
+
+    return () => {
+      // opsiyonel: temizlemek istersen
+      // delete window.__nativeImagePickResult;
+    };
+  }, [debugLog, toast]);
+
+  const openPhotoPicker = useCallback(() => {
+    if (isNativePickerAvailable) {
+      debugLog("Opening native gallery picker");
+      window.NativeImage.pickImageFromGallery();
+      return;
+    }
+    debugLog("Opening web file input picker");
+    fileInputRef.current?.click();
+  }, [isNativePickerAvailable, debugLog]);
 
   const normalizeImageFile = useCallback(async (file) => {
     if (!file) return file;
@@ -138,192 +200,161 @@ const isQuotaReached = currentQuota >= quotaLimit;
     }
   }, [debugLog]);
 
-
   //---------------------------------------------
-// PLAN LİMİTLERİ
-//---------------------------------------------
-const PLAN_LIMITS = {
-  free: { daily: 3, monthly: 3 },
-  basic: { daily: 10, monthly: 30 },
-  pro: { daily: 20, monthly: 60 },
-  kapsamli: { daily: 99999, monthly: 99999 },
-
-  // --- GOOGLE PLAY IDLERİ ---
-  "sub_premium_monthly": { daily: 30, monthly: 1000 },
-  "sub_pro_monthly": { daily: 50, monthly: 2000 },
-  "sub_unlimited_monthly": { daily: 99999, monthly: 99999 }
-};
-
-//---------------------------------------------
-// GÜNLÜK / AYLIK RESET KONTROLÜ
-//---------------------------------------------
-function resetIfNeeded(user) {
-  const now = new Date();
-  const lastDaily = user.last_daily_reset ? new Date(user.last_daily_reset) : null;
-  const lastMonthly = user.last_monthly_reset ? new Date(user.last_monthly_reset) : null;
-
-  let needsDailyReset = false;
-  let needsMonthlyReset = false;
-
-  // Günlük reset (tarih değiştiyse)
-  if (!lastDaily || lastDaily.toDateString() !== now.toDateString()) {
-    needsDailyReset = true;
-  }
-
-  // Aylık reset (ay değiştiyse)
-  if (!lastMonthly || lastMonthly.getMonth() !== now.getMonth()) {
-    needsMonthlyReset = true;
-  }
-
-  return { needsDailyReset, needsMonthlyReset };
-}
-
-//---------------------------------------------
-// KULLANICI KOTA VERİSİ HAZIRLAMA
-//---------------------------------------------
-function getQuotaData(user) {
-  const plan = user.plan_tier || "free";
-  const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
-
-  const dailyUsed = user.ai_usage_daily || 0;
-  const monthlyUsed = user.ai_usage_monthly || 0;
-
-  return {
-    limits,
-    dailyUsed,
-    monthlyUsed,
-    dailyRemaining: limits.daily - dailyUsed,
-    monthlyRemaining: limits.monthly - monthlyUsed,
-    isDailyExceeded: dailyUsed >= limits.daily,
-    isMonthlyExceeded: monthlyUsed >= limits.monthly,
-  };
-}
-
-//---------------------------------------------
-// API → KOTA KONTROL + RESET
-//---------------------------------------------
-// =====================================================
-// KOTA KONTROLÜ — Senin kolonlarına tam uyumlu
-// =====================================================
-async function checkAndUpdateQuota(supabase, userId) {
-  // Kullanıcıyı çek
-  const { data: user, error } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", userId)
-    .single();
-
-  if (error || !user)
-    return { allowed: false, reason: "USER_NOT_FOUND" };
-
-  // Bugünün tarihi
-  const today = new Date().toISOString().split("T")[0];
-  const month = new Date().toISOString().slice(0, 7);
-
-  let dailyUsed = user.ai_daily_used || 0;
-  let monthlyUsed = user.ai_monthly_used || 0;
-
   // PLAN LİMİTLERİ
-  const planLimits = {
-    free: { daily: 3, monthly: 3 }, // Burayı 0'dan 3'e çektim ki hata olsa bile çalışsın
-    basic: { daily: 10, monthly: 30 },
-    pro: { daily: 20, monthly: 60 },
-    kapsamli: { daily: 99999, monthly: 99999 }, // Kapsamlıyı artırdım
-    
-    // --- BURASI EKSİKTİ ---
+  //---------------------------------------------
+  const PLAN_LIMITS = {
+    free: { daily: 3, monthly: 3 },
+    basic: { daily: 10, monthly: 30 },
+    pro: { daily: 20, monthly: 60 },
+    kapsamli: { daily: 99999, monthly: 99999 },
+
     "sub_premium_monthly": { daily: 30, monthly: 1000 },
     "sub_pro_monthly": { daily: 50, monthly: 2000 },
-    "sub_unlimited_monthly": { daily: 99999, monthly: 99999 } // <-- SENİN PLANIN BU
-  };
+    "sub_unlimited_monthly": { daily: 99999, monthly: 99999 }
+  };
 
-  const limits = planLimits[user.plan_tier] || planLimits.free;
+  function resetIfNeeded(user) {
+    const now = new Date();
+    const lastDaily = user.last_daily_reset ? new Date(user.last_daily_reset) : null;
+    const lastMonthly = user.last_monthly_reset ? new Date(user.last_monthly_reset) : null;
 
-  // ==========================
-  //   GÜNLÜK SIFIRLAMA
-  // ==========================
-  if (user.ai_last_use_date !== today) {
-    dailyUsed = 0;
-    await supabase
-      .from("profiles")
-      .update({
-        ai_daily_used: 0,
-        ai_last_use_date: today,
-      })
-      .eq("id", userId);
+    let needsDailyReset = false;
+    let needsMonthlyReset = false;
+
+    if (!lastDaily || lastDaily.toDateString() !== now.toDateString()) {
+      needsDailyReset = true;
+    }
+
+    if (!lastMonthly || lastMonthly.getMonth() !== now.getMonth()) {
+      needsMonthlyReset = true;
+    }
+
+    return { needsDailyReset, needsMonthlyReset };
   }
 
-  // ==========================
-  //   AYLIK SIFIRLAMA
-  // ==========================
-  if (user.ai_last_use_month !== month) {
-    monthlyUsed = 0;
-    await supabase
-      .from("profiles")
-      .update({
-        ai_monthly_used: 0,
-        ai_last_use_month: month,
-      })
-      .eq("id", userId);
-  }
+  function getQuotaData(user) {
+    const plan = user.plan_tier || "free";
+    const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
 
-  // Sınırları tekrar hesapla
-  if (dailyUsed >= limits.daily) {
+    const dailyUsed = user.ai_usage_daily || 0;
+    const monthlyUsed = user.ai_usage_monthly || 0;
+
     return {
-      allowed: false,
-      reason: "DAILY_LIMIT_REACHED",
-      quota: { dailyUsed, limits },
-    };
-  }
-
-
-//-----------------------------------------------------
-// AI kullanım hakkını 1 arttır (günlük + aylık)
-//-----------------------------------------------------
-async function incrementAiUsage(supabase, userId) {
-  const { data: user, error } = await supabase
-    .from("profiles")
-    .select("ai_daily_used, ai_monthly_used")
-    .eq("id", userId)
-    .single();
-
-  if (error || !user) return;
-
-  const today = new Date().toISOString().split("T")[0];
-  const month = new Date().toISOString().slice(0, 7);
-
-  const daily = (user.ai_daily_used ?? 0) + 1;
-  const monthly = (user.ai_monthly_used ?? 0) + 1;
-
-  await supabase
-    .from("profiles")
-    .update({
-      ai_daily_used: daily,
-      ai_monthly_used: monthly,
-      ai_last_use_date: today,
-      ai_last_use_month: month,
-    })
-    .eq("id", userId);
-}
-
-  if (monthlyUsed >= limits.monthly) {
-    return {
-      allowed: false,
-      reason: "MONTHLY_LIMIT_REACHED",
-      quota: { monthlyUsed, limits },
-    };
-  }
-
-  return {
-    allowed: true,
-    quota: {
+      limits,
       dailyUsed,
       monthlyUsed,
-      limits,
-    },
-    user,
-  };
-}
+      dailyRemaining: limits.daily - dailyUsed,
+      monthlyRemaining: limits.monthly - monthlyUsed,
+      isDailyExceeded: dailyUsed >= limits.daily,
+      isMonthlyExceeded: monthlyUsed >= limits.monthly,
+    };
+  }
 
+  async function checkAndUpdateQuota(supabase, userId) {
+    const { data: user, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
+      .single();
+
+    if (error || !user)
+      return { allowed: false, reason: "USER_NOT_FOUND" };
+
+    const today = new Date().toISOString().split("T")[0];
+    const month = new Date().toISOString().slice(0, 7);
+
+    let dailyUsed = user.ai_daily_used || 0;
+    let monthlyUsed = user.ai_monthly_used || 0;
+
+    const planLimits = {
+      free: { daily: 3, monthly: 3 },
+      basic: { daily: 10, monthly: 30 },
+      pro: { daily: 20, monthly: 60 },
+      kapsamli: { daily: 99999, monthly: 99999 },
+
+      "sub_premium_monthly": { daily: 30, monthly: 1000 },
+      "sub_pro_monthly": { daily: 50, monthly: 2000 },
+      "sub_unlimited_monthly": { daily: 99999, monthly: 99999 }
+    };
+
+    const limits = planLimits[user.plan_tier] || planLimits.free;
+
+    if (user.ai_last_use_date !== today) {
+      dailyUsed = 0;
+      await supabase
+        .from("profiles")
+        .update({
+          ai_daily_used: 0,
+          ai_last_use_date: today,
+        })
+        .eq("id", userId);
+    }
+
+    if (user.ai_last_use_month !== month) {
+      monthlyUsed = 0;
+      await supabase
+        .from("profiles")
+        .update({
+          ai_monthly_used: 0,
+          ai_last_use_month: month,
+        })
+        .eq("id", userId);
+    }
+
+    if (dailyUsed >= limits.daily) {
+      return {
+        allowed: false,
+        reason: "DAILY_LIMIT_REACHED",
+        quota: { dailyUsed, limits },
+      };
+    }
+
+    async function incrementAiUsage(supabase, userId) {
+      const { data: user, error } = await supabase
+        .from("profiles")
+        .select("ai_daily_used, ai_monthly_used")
+        .eq("id", userId)
+        .single();
+
+      if (error || !user) return;
+
+      const today = new Date().toISOString().split("T")[0];
+      const month = new Date().toISOString().slice(0, 7);
+
+      const daily = (user.ai_daily_used ?? 0) + 1;
+      const monthly = (user.ai_monthly_used ?? 0) + 1;
+
+      await supabase
+        .from("profiles")
+        .update({
+          ai_daily_used: daily,
+          ai_monthly_used: monthly,
+          ai_last_use_date: today,
+          ai_last_use_month: month,
+        })
+        .eq("id", userId);
+    }
+
+    if (monthlyUsed >= limits.monthly) {
+      return {
+        allowed: false,
+        reason: "MONTHLY_LIMIT_REACHED",
+        quota: { monthlyUsed, limits },
+      };
+    }
+
+    return {
+      allowed: true,
+      quota: {
+        dailyUsed,
+        monthlyUsed,
+        limits,
+      },
+      user,
+      incrementAiUsage, // dışarıdan çağırmak için dönelim
+    };
+  }
 
   // =====================================================
   //                     SEARCH FOODS
@@ -343,6 +374,7 @@ async function incrementAiUsage(supabase, userId) {
       .limit(50);
 
     if (error) {
+      // eslint-disable-next-line no-console
       console.error(error);
       toast({
         variant: 'destructive',
@@ -365,37 +397,35 @@ async function incrementAiUsage(supabase, userId) {
   //                MANUEL YEMEK EKLEME
   // =====================================================
   const getMultiplier = (unit, quantity, food) => {
-  let totalGram = 0;
+    let totalGram = 0;
 
-  switch (unit) {
-    case 'gram':
-      totalGram = quantity;
-      break;
+    switch (unit) {
+      case 'gram':
+        totalGram = quantity;
+        break;
 
-    case 'adet':
-      totalGram = quantity * (food.unit_gram || 100);
-      break;
+      case 'adet':
+        totalGram = quantity * (food.unit_gram || 100);
+        break;
 
-    case 'porsiyon':
-      totalGram = quantity * (food.portion_gram || 200);
-      break;
+      case 'porsiyon':
+        totalGram = quantity * (food.portion_gram || 200);
+        break;
 
-    case 'bardak':
-      totalGram = quantity * 200;
-      break;
+      case 'bardak':
+        totalGram = quantity * 200;
+        break;
 
-    case 'kasik':
-      totalGram = quantity * 15;
-      break;
+      case 'kasik':
+        totalGram = quantity * 15;
+        break;
 
-    default:
-      totalGram = quantity;
-  }
+      default:
+        totalGram = quantity;
+    }
 
-  // ürün 100 gramlık değer içeriyor → multiplier hesaplıyoruz
-  return totalGram / 100;
-};
-
+    return totalGram / 100;
+  };
 
   const handleAddMeal = () => {
     if (!selectedFood || !quantity || quantity <= 0) {
@@ -407,21 +437,18 @@ async function incrementAiUsage(supabase, userId) {
       return;
     }
 
-    const multiplier = getMultiplier(unit, selectedFood);
-
     const meal = {
-  meal_type: mealType,
-  food_name: analysisResult?.name || "Bilinmeyen",
-  calories: Number(analysisResult?.calories ?? 0),
-  protein: Number(analysisResult?.protein ?? 0),
-  carbs: Number(analysisResult?.carbs ?? 0),
-  fat: Number(analysisResult?.fat ?? 0),
-  quantity: Number(analysisResult?.quantity ?? 1),
-  unit: analysisResult?.unit || "adet",
-  user_id: user.id,
-  date: new Date().toISOString().split('T')[0],
-};
-
+      meal_type: mealType,
+      food_name: analysisResult?.name || "Bilinmeyen",
+      calories: Number(analysisResult?.calories ?? 0),
+      protein: Number(analysisResult?.protein ?? 0),
+      carbs: Number(analysisResult?.carbs ?? 0),
+      fat: Number(analysisResult?.fat ?? 0),
+      quantity: Number(analysisResult?.quantity ?? 1),
+      unit: analysisResult?.unit || "adet",
+      user_id: user.id,
+      date: new Date().toISOString().split('T')[0],
+    };
 
     addMeal(meal);
     setSelectedFood(null);
@@ -439,8 +466,10 @@ async function incrementAiUsage(supabase, userId) {
   // =====================================================
   const handleFileChange = (e) => {
     if (e.target.files?.length > 0) {
-      setAiFile(e.target.files[0]);
+      const f = e.target.files[0];
+      setAiFile(f);
       setAnalysisResult(null);
+      debugLog("Web input file selected", { name: f?.name, type: f?.type, size: f?.size });
     }
   };
 
@@ -453,120 +482,137 @@ async function incrementAiUsage(supabase, userId) {
     }
   };
 
-const handleAnalyze = async () => {
-  if (!aiFile || !user || isAnalyzing) return;
+  const handleAnalyze = async () => {
+    if (!aiFile || !user || isAnalyzing) return;
 
-  setIsAnalyzing(true);
-  setAnalysisResult(null);
+    // ✅ extra guard: 0-byte ise hiç başlama
+    if (aiFile.size === 0) {
+      debugLog("Blocked analyze: 0-byte file", { name: aiFile?.name, type: aiFile?.type, size: aiFile?.size });
+      setShowAiDebug(true);
+      toast({
+        variant: "destructive",
+        title: "Fotoğraf Hatası",
+        description: "Seçilen görsel boş (0 byte). Android'de native picker ile seçmeyi deneyin.",
+      });
+      return;
+    }
 
-  // === 1) KOTA KONTROLÜ ===
-  const quota = await checkAndUpdateQuota(supabase, user.id);
+    setIsAnalyzing(true);
+    setAnalysisResult(null);
 
-  if (!quota.allowed) {
-    toast({
-      variant: "destructive",
-      title: "Limit Doldu",
-      description:
-        quota.reason === "DAILY_LIMIT_REACHED"
-          ? "Günlük AI kullanım hakkınız doldu."
-          : "Aylık AI kullanım hakkınız doldu.",
-    });
-    setIsAnalyzing(false);
-    return;
-  }
+    // === 1) KOTA KONTROLÜ ===
+    const quota = await checkAndUpdateQuota(supabase, user.id);
 
-  try {
-    // === 2) Fotoğraf yükleme ===
-    // Mobile'da HEIC/HEIF sık geldiği için normalize ediyoruz
-    const normalizedFile = await normalizeImageFile(aiFile);
+    if (!quota.allowed) {
+      toast({
+        variant: "destructive",
+        title: "Limit Doldu",
+        description:
+          quota.reason === "DAILY_LIMIT_REACHED"
+            ? "Günlük AI kullanım hakkınız doldu."
+            : "Aylık AI kullanım hakkınız doldu.",
+      });
+      setIsAnalyzing(false);
+      return;
+    }
 
-    const safeName = normalizedFile?.name || aiFile?.name || "";
-    const extFromName = safeName.includes(".") ? safeName.split(".").pop() : null;
-    const extFromType = (normalizedFile?.type || aiFile?.type || "").split("/")[1] || null;
-    const ext = (extFromName || extFromType || "jpg").toLowerCase();
+    try {
+      // === 2) Fotoğraf yükleme ===
+      const normalizedFile = await normalizeImageFile(aiFile);
 
-    const fileName = `${uuidv4()}.${ext}`;
-    const filePath = `${user.id}/${fileName}`;
+      // burada da 0-byte kontrol
+      if (!normalizedFile || normalizedFile.size === 0) {
+        debugLog("Blocked upload: normalized file is 0-byte", { name: normalizedFile?.name, type: normalizedFile?.type, size: normalizedFile?.size });
+        throw new Error("EMPTY_FILE_AFTER_NORMALIZE");
+      }
 
-    debugLog("Uploading to storage", { bucket: FOOD_BUCKET, filePath, ext, contentType: normalizedFile?.type || aiFile?.type });
+      const safeName = normalizedFile?.name || aiFile?.name || "";
+      const extFromName = safeName.includes(".") ? safeName.split(".").pop() : null;
+      const extFromType = (normalizedFile?.type || aiFile?.type || "").split("/")[1] || null;
+      const ext = (extFromName || extFromType || "jpg").toLowerCase();
 
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from(FOOD_BUCKET)
-      .upload(filePath, normalizedFile, {
-        contentType: normalizedFile?.type || aiFile?.type || "image/jpeg",
-        upsert: false,
-        cacheControl: "3600",
+      const fileName = `${uuidv4()}.${ext}`;
+      const filePath = `${user.id}/${fileName}`;
+
+      debugLog("Uploading to storage", { bucket: FOOD_BUCKET, filePath, ext, contentType: normalizedFile?.type || aiFile?.type });
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from(FOOD_BUCKET)
+        .upload(filePath, normalizedFile, {
+          contentType: normalizedFile?.type || aiFile?.type || "image/jpeg",
+          upsert: false,
+          cacheControl: "3600",
+        });
+
+      debugLog("Upload result", { ok: !uploadError, uploadData, uploadError: uploadError?.message || uploadError });
+
+      if (uploadError) throw uploadError;
+
+      // === 3) Public URL ===
+      const { data: publicData } = supabase.storage
+        .from(FOOD_BUCKET)
+        .getPublicUrl(filePath);
+
+      const imageUrl = publicData?.publicUrl;
+      if (!imageUrl) throw new Error("PUBLIC_URL_FAIL");
+
+      // === 4) Session ===
+      const { data: { session } } = await supabase.auth.getSession();
+      debugLog("Session check", { hasSession: !!session, hasToken: !!session?.access_token });
+      if (!session?.access_token) throw new Error("NO_SESSION");
+
+      // === 5) AI ANALİZ ===
+      debugLog("Invoking function", { fn: "analyze-food-image", imageUrlLen: imageUrl?.length });
+
+      const { data, error } = await supabase.functions.invoke(
+        "analyze-food-image",
+        {
+          body: { imageUrl },
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }
+      );
+
+      debugLog("Function response", {
+        ok: !error,
+        error: error?.message || error,
+        dataKeys: data && typeof data === "object" ? Object.keys(data) : typeof data,
       });
 
-    debugLog("Upload result", { ok: !uploadError, uploadData, uploadError: uploadError?.message || uploadError });
+      if (error) throw error;
 
-    if (uploadError) throw uploadError;
+      setAnalysisResult(data);
 
-    // === 3) Public URL ===
-    const { data: publicData } = supabase.storage
-      .from(FOOD_BUCKET)
-      .getPublicUrl(filePath);
-
-    const imageUrl = publicData?.publicUrl;
-    if (!imageUrl) throw new Error("PUBLIC_URL_FAIL");
-
-    // === 4) Session ===
-    const { data: { session } } = await supabase.auth.getSession();
-    debugLog("Session check", { hasSession: !!session, hasToken: !!session?.access_token });
-    if (!session?.access_token) throw new Error("NO_SESSION");
-
-    // === 5) AI ANALİZ ===
-    debugLog("Invoking function", { fn: "analyze-food-image", imageUrlLen: imageUrl?.length });
-
-    const { data, error } = await supabase.functions.invoke(
-      "analyze-food-image",
-      {
-        body: { imageUrl },
-        headers: { Authorization: `Bearer ${session.access_token}` },
+      // === 6) KULLANIM HAKKINI DÜŞÜR ===
+      // checkAndUpdateQuota içinden dönen incrementAiUsage fonksiyonu
+      if (typeof quota.incrementAiUsage === "function") {
+        await quota.incrementAiUsage(supabase, user.id);
       }
-    );
 
-    debugLog("Function response", {
-      ok: !error,
-      error: error?.message || error,
-      dataKeys: data && typeof data === "object" ? Object.keys(data) : typeof data,
-    });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(err);
 
-    if (error) throw error;
+      debugLog("Analyze error (catch)", {
+        message: err?.message,
+        name: err?.name,
+        status: err?.status,
+        code: err?.code,
+        details: err?.details,
+        hint: err?.hint,
+        stack: err?.stack ? String(err.stack).slice(0, 1000) : undefined,
+      });
 
-    setAnalysisResult(data);
+      setShowAiDebug(true);
 
-    // === 6) KULLANIM HAKKINI DÜŞÜR ===
-    await incrementAiUsage(supabase, user.id);
+      toast({
+        variant: "destructive",
+        title: "Analiz Hatası",
+        description: "Analiz yapılamadı. (Detaylar için Debug Logları açın)",
+      });
+    }
 
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(err);
-
-    debugLog("Analyze error (catch)", {
-      message: err?.message,
-      name: err?.name,
-      status: err?.status,
-      code: err?.code,
-      details: err?.details,
-      hint: err?.hint,
-      stack: err?.stack ? String(err.stack).slice(0, 1000) : undefined,
-    });
-
-    // Mobilde console'a erişemeyince ekranda göstermek için
-    setShowAiDebug(true);
-
-    toast({
-      variant: "destructive",
-      title: "Analiz Hatası",
-      description: "Analiz yapılamadı. (Detaylar için Debug Logları açın)",
-    });
-  }
-
-  setIsAnalyzing(false);
-};
-
-
+    setIsAnalyzing(false);
+  };
 
   const handleConfirmMealFromAI = () => {
     if (!analysisResult) return;
@@ -607,15 +653,15 @@ const handleAnalyze = async () => {
 
   const calculatedMacros = selectedFood
     ? (() => {
-        const multiplier = getMultiplier(unit, selectedFood);
-        const total = quantity * multiplier;
-        return {
-          calories: (selectedFood.calories * total).toFixed(0),
-          protein: (selectedFood.protein * total).toFixed(1),
-          carbs: (selectedFood.carbs * total).toFixed(1),
-          fat: (selectedFood.fat * total).toFixed(1),
-        };
-      })()
+      const multiplier = getMultiplier(unit, selectedFood);
+      const total = quantity * multiplier;
+      return {
+        calories: (selectedFood.calories * total).toFixed(0),
+        protein: (selectedFood.protein * total).toFixed(1),
+        carbs: (selectedFood.carbs * total).toFixed(1),
+        fat: (selectedFood.fat * total).toFixed(1),
+      };
+    })()
     : null;
 
   return (
@@ -741,7 +787,7 @@ const handleAnalyze = async () => {
             </div>
           ) : (
             <div className="space-y-3">
-              {/* GİZLİ INPUT */}
+              {/* GİZLİ INPUT (WEB FALLBACK) */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -751,7 +797,7 @@ const handleAnalyze = async () => {
                 onChange={handleFileChange}
               />
 
-              {/* DEBUG BUTONLARI (mobilde log görmek için) */}
+              {/* DEBUG BUTONLARI */}
               <div className="flex gap-2">
                 <Button
                   type="button"
@@ -774,11 +820,17 @@ const handleAnalyze = async () => {
               {/* FOTOĞRAF YÜKLEME BUTONU */}
               {!aiFile && (
                 <Label
-                  htmlFor="upload-ai"
+                  role="button"
+                  tabIndex={0}
+                  onClick={openPhotoPicker}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openPhotoPicker(); }}
                   className="cursor-pointer flex flex-col items-center justify-center p-8 border-2 border-emerald-300 border-dashed rounded-lg hover:bg-emerald-50"
                 >
                   <Camera className="h-8 w-8 text-emerald-500" />
                   <p className="mt-2 font-medium text-emerald-700">Yemek Fotoğrafı Yükle</p>
+                  {isNativePickerAvailable ? (
+                    <p className="mt-1 text-xs text-gray-500">Android uygulama: Native picker kullanılacak</p>
+                  ) : null}
                 </Label>
               )}
 
@@ -786,11 +838,12 @@ const handleAnalyze = async () => {
               {aiFile && (
                 <div className="flex flex-col items-center gap-3 p-4 border rounded-lg bg-gray-50">
                   <p className="font-medium text-gray-800 text-sm">{aiFile.name}</p>
+                  <p className="text-xs text-gray-500">Boyut: {aiFile.size} bytes</p>
 
                   <div className="flex gap-3">
                     <Button
                       variant="outline"
-                      onClick={() => fileInputRef.current?.click()}
+                      onClick={openPhotoPicker}
                       className="border-blue-500 text-blue-600 hover:bg-blue-50"
                     >
                       Değiştir
