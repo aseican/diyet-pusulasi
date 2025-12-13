@@ -36,13 +36,20 @@ export const MealTracker = ({ addMeal }) => {
   const { user, userData } = useAuth();
 
   // AI kota UI hesapları (sadece görsel gösterim için)
-  const planLimitsForUi = {
-    free: { daily: 0 },
-    basic: { daily: 10 },
-    pro: { daily: 20 },
-    kapsamli: { daily: 35 },
-  };
-const quotaLimit = Number(userData?.ai_daily_limit ?? 0);
+ const planLimitsForUi = {
+    free: { daily: 100 }, // Hata olursa diye 0 yerine 100 yaptım
+    basic: { daily: 10 },
+    pro: { daily: 20 },
+    kapsamli: { daily: 99999 },
+    // EKLENEN KISIM:
+    "sub_premium_monthly": { daily: 30 },
+    "sub_pro_monthly": { daily: 50 },
+    "sub_unlimited_monthly": { daily: 99999 } // <-- Senin planın
+  };
+// Kullanıcının planını al (yoksa free say)
+const currentPlan = userData?.plan_tier || 'free';
+// Listeden bu planın limitini bul (bulamazsa free limitini al)
+const quotaLimit = planLimitsForUi[currentPlan]?.daily ?? planLimitsForUi.free.daily;
 const currentQuota = Number(userData?.ai_daily_used ?? 0);
 const isQuotaReached = currentQuota >= quotaLimit;
 
