@@ -146,23 +146,23 @@ async function normalizeImageFile(file) {
 }
 
 export const MealTracker = ({ addMeal }) => {
-  const { toast } = useToast();
-  const { user, userData } = useAuth();
+const { toast } = useToast();
+const { user, userData } = useAuth();
 
-  // ✅ Tabs state (kalıcı + stabil)
-  const [activeTab, setActiveTab] = useState(() => {
-    try {
-      return localStorage.getItem("mealtracker_activeTab") || "manual";
-    } catch {
-      return "manual";
-    }
-  });
+// ✅ Tabs state (kalıcı + stabil)
+const [activeTab, setActiveTab] = useState(() => {
+  try {
+    return localStorage.getItem("mealtracker_activeTab") || "manual";
+  } catch {
+    return "manual";
+  }
+});
 
-  useEffect(() => {
-    try {
-      localStorage.setItem("mealtracker_activeTab", activeTab);
-    } catch {}
-  }, [activeTab]);
+useEffect(() => {
+  try {
+    localStorage.setItem("mealtracker_activeTab", activeTab);
+  } catch {}
+}, [activeTab]);
 
   // Kullanıcı planı (UI için)
   const currentPlan = userData?.plan_tier || "free";
@@ -183,6 +183,39 @@ export const MealTracker = ({ addMeal }) => {
   // AI FOTOĞRAF STATE
   const fileInputRef = useRef(null);
   const [aiFile, setAiFile] = useState(null);
+    // Foto seçildiyse her zaman AI tab'da kal
+  useEffect(() => {
+    if (aiFile) {
+      setActiveTab("ai");
+      try {
+        localStorage.setItem("mealtracker_activeTab", "ai");
+      } catch {}
+    }
+  }, [aiFile]);
+
+    // Galeriden geri dönünce tab'ı tekrar AI'ye çek
+  useEffect(() => {
+    const restoreTab = () => {
+      if (aiFile) {
+        setActiveTab("ai");
+        try {
+          localStorage.setItem("mealtracker_activeTab", "ai");
+        } catch {}
+      }
+    };
+
+    window.addEventListener("focus", restoreTab);
+    const onVis = () => {
+      if (!document.hidden) restoreTab();
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      window.removeEventListener("focus", restoreTab);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [aiFile]);
+
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
 
