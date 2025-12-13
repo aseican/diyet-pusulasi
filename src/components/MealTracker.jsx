@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -28,7 +29,7 @@ export const MealTracker = ({ addMeal }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
   const [isQuotaReached, setIsQuotaReached] = useState(false);
-  
+
   const fileInputRef = useRef(null);
 
   // Plan ve kota limitlerini al
