@@ -150,19 +150,19 @@ const { toast } = useToast();
 const { user, userData } = useAuth();
 
 // ✅ Tabs state (kalıcı + stabil)
-const [activeTab, setActiveTab] = useState(() => {
-  try {
-    return localStorage.getItem("mealtracker_activeTab") || "manual";
-  } catch {
-    return "manual";
-  }
-});
+const getTabFromHash = () => {
+  const h = (window.location.hash || "").replace("#", "");
+  return h === "ai" ? "ai" : "manual";
+};
+
+const [activeTab, setActiveTab] = useState(getTabFromHash);
 
 useEffect(() => {
-  try {
-    localStorage.setItem("mealtracker_activeTab", activeTab);
-  } catch {}
-}, [activeTab]);
+  const onHash = () => setActiveTab(getTabFromHash());
+  window.addEventListener("hashchange", onHash);
+  return () => window.removeEventListener("hashchange", onHash);
+}, []);
+
 
   // Kullanıcı planı (UI için)
   const currentPlan = userData?.plan_tier || "free";
@@ -195,26 +195,38 @@ useEffect(() => {
 
     // Galeriden geri dönünce tab'ı tekrar AI'ye çek
   useEffect(() => {
-    const restoreTab = () => {
-      if (aiFile) {
-        setActiveTab("ai");
-        try {
-          localStorage.setItem("mealtracker_activeTab", "ai");
-        } catch {}
-      }
-    };
+  if (aiFile) {
+    setActiveTab("ai");
+    window.location.hash = "ai";
+  }
+}, [aiFile]);
 
-    window.addEventListener("focus", restoreTab);
-    const onVis = () => {
-      if (!document.hidden) restoreTab();
-    };
-    document.addEventListener("visibilitychange", onVis);
+// =====================================================
+// GALERİDEN GERİ DÖNÜŞTE AI TAB'A KİLİT (KESİN ÇÖZÜM)
+// =====================================================
+useEffect(() => {
+  const restoreTab = () => {
+    if (aiFile) {
+      setActiveTab("ai");
+      window.location.hash = "ai";
+    }
+  };
 
-    return () => {
-      window.removeEventListener("focus", restoreTab);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-  }, [aiFile]);
+  // Galeri -> uygulamaya dönüş
+  window.addEventListener("focus", restoreTab);
+
+  // Arka plan / ön plan geçişleri
+  const onVisibilityChange = () => {
+    if (!document.hidden) restoreTab();
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange);
+
+  return () => {
+    window.removeEventListener("focus", restoreTab);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
+  };
+}, [aiFile]);
+
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -627,13 +639,15 @@ useEffect(() => {
         <p className="text-gray-500">Geniş veritabanından yiyecek arayın veya fotoğrafla analiz edin.</p>
       </motion.div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid grid-cols-2 w-full">
-          <TabsTrigger value="manual">Manuel Arama</TabsTrigger>
-          <TabsTrigger value="ai">
-            <Zap className="h-4 w-4 mr-1" /> Yapay Zeka
-          </TabsTrigger>
-        </TabsList>
+      <Tabs
+  value={activeTab}
+  onValueChange={(v) => {
+    setActiveTab(v);
+    window.location.hash = v; // ✅ manual / ai
+  }}
+  className="w-full"
+>
+
 
         {/* MANUEL ARAMA TAB */}
         <TabsContent value="manual" className="p-4 space-y-4 bg-white shadow rounded-b-lg">
