@@ -41,6 +41,8 @@ export const MealTracker = ({ addMeal }) => {
     basic: { daily: 10 },
     pro: { daily: 20 },
     kapsamli: { daily: 99999 },
+    Kapsamli: { daily: 99999 },
+    sub_unlimited_monthly: { daily: 99999 },
     // EKLENEN KISIM:
     "sub_premium_monthly": { daily: 30 },
     "sub_pro_monthly": { daily: 50 },
