@@ -190,14 +190,48 @@ Deno.serve(async (req) => {
             model: "gpt-4o-mini",
             response_format: { type: "json_object" },
             messages: [
-                {
-                    role: "user",
-                    content: [
-                        { type: "text", text: "Bu fotoğrafı analiz et ve sadece JSON formatında besin bilgisi döndür. Anahtar kelimeler: name, calories, protein, carbs, fat, quantity, unit. Türkçe kullan." },
-                        { type: "image_url", image_url: { url: body.imageUrl, detail: "low" } },
-                    ],
-                },
-            ],
+  {
+    role: "user",
+    content: [
+      {
+        type: "text",
+        text: `
+Bu bir yemek fotoğrafıdır.
+
+Fotoğrafta:
+- Bir veya birden fazla yiyecek olabilir
+- Türk mutfağı dahil tüm mutfakları düşün
+- Emin olmasan bile EN OLASI tahmini yap
+- Dürüm, ayran, tatlı, içecek, sos gibi yan ürünleri de dahil et
+
+Her zaman TEK bir JSON döndür.
+Asla açıklama yazma.
+
+Alanlar:
+- name (Türkçe, açıklayıcı)
+- calories (tahmini)
+- protein
+- carbs
+- fat
+- quantity (sayısal)
+- unit (gram, adet, porsiyon gibi)
+
+Eğer birden fazla ürün varsa:
+Ana ürünü seç (örn: Tavuk Dürüm)
+Yan ürünleri name içinde belirt (örn: Tavuk Dürüm + Ayran)
+`
+      },
+      {
+        type: "image_url",
+        image_url: {
+          url: body.imageUrl,
+          detail: "high"
+        }
+      }
+    ]
+  }
+]
+
         }),
     });
 
