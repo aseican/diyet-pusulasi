@@ -286,7 +286,15 @@ export function MealTracker({ addMeal }) {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
 
-      if (error) throw error;
+      if (error) {
+  // Supabase functions error body'yi ekrana bas
+  let extra = "";
+  try {
+    extra = error?.context?.body ? ` | ${JSON.stringify(error.context.body)}` : "";
+  } catch {}
+  throw new Error((error.message || "invoke_error") + extra);
+}
+
       if (data?.error) throw new Error(data.error);
 
       const f = data?.food;
