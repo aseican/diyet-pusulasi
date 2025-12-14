@@ -4,8 +4,6 @@ import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
 import { calculateCalorieTarget } from '@/lib/calculator';
-
-// Native WebView import etmiyoruz, dynamic require ile çözeceğiz
 import { handlePurchase } from '@/lib/BillingIntegration';
 
 import Header from '@/components/Header';
@@ -18,44 +16,47 @@ import Onboarding from '@/components/Onboarding';
 import AuthScreen from '@/components/AuthScreen';
 import { PremiumUyelik } from '@/components/PremiumUyelik';
 
-// 🟢 WebView'ı sadece Native Ortamda (APK) yüklemek için geçici bir değişken tanımlayalım.
-let WebViewComponent;
-try {
-  // Eğer Native ortamda çalışıyorsa, require başarılı olur.
-  WebViewComponent = require('react-native-webview').WebView;
-} catch (e) {
-  // Eğer Web ortamında çalışıyorsa, require başarısız olur ve biz WebView'ı bir mock ile değiştiririz.
-  WebViewComponent = (props) => (
-    <div
-      {...props}
-      style={{
-        ...props.style,
-        backgroundColor: '#f0f0f0',
-        border: '2px solid #ccc',
-        textAlign: 'center',
-        paddingTop: 50,
-      }}
-    >
-      <p style={{ fontWeight: 'bold' }}>
-        Bu içerik sadece Native (APK) ortamında görüntülenebilir.
-      </p>
-    </div>
-  );
+/**
+ * ✅ Native image callback - GLOBAL BUFFER
+ * Android her zaman: window.__nativeImagePickResult && window.__nativeImagePickResult(b64, mime)
+ * çağırıyor. Component unmount olsa bile kaybolmaması için burada bufferlıyoruz.
+ */
+if (typeof window !== 'undefined') {
+  if (!window.__nativeImagePickResult) {
+    window.__nativeImagePickResult = (b64, mime) => {
+      window.__nativeImagePickBuffer = { b64, mime, ts: Date.now() };
+      // Debug
+      // eslint-disable-next-line no-console
+      console.log('[NATIVE] buffered image', { hasB64: !!b64, mime, len: b64?.length || 0 });
+    };
+  }
 }
 
 export function App() {
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = React.useState('dashboard');
+
+  // ✅ activeTab'i persist et: picker’dan dönünce resetlenmesin
+  const [activeTab, setActiveTab] = React.useState(() => {
+    try {
+      return localStorage.getItem('activeTab') || 'dashboard';
+    } catch {
+      return 'dashboard';
+    }
+  });
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('activeTab', activeTab);
+    } catch {}
+  }, [activeTab]);
+
   const [userData, setUserData] = React.useState(null);
   const [meals, setMeals] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
 
-  // WebView komponentine erişmek için
+  // WebView komponentine erişmek için (sende gerçek RN yoksa bile zarar vermez)
   const webViewRef = useRef(null);
-
-  // Web sitesinin ana URL'si
-  const BASE_WEB_URL = 'https://diyettakip.org';
 
   // Supabase oturum token'ını alır.
   const getSupabaseSessionToken = React.useCallback(async () => {
@@ -64,7 +65,6 @@ export function App() {
     return data.session?.access_token || null;
   }, [user]);
 
-  // === FETCH USER DATA (Tek Satır Sorgu) ===
   const fetchUserData = React.useCallback(async () => {
     if (!user) return;
 
@@ -88,7 +88,6 @@ export function App() {
     }
   }, [user, toast]);
 
-  // === FETCH MEALS ===
   const fetchMeals = React.useCallback(async () => {
     if (!user) return;
     const { data, error } = await supabase
@@ -109,7 +108,6 @@ export function App() {
     }
   }, [user, toast]);
 
-  // === PROFİL GÜNCELLEME (kalori hesap + su vs.) ===
   const updateUserData = React.useCallback(
     async (newData) => {
       if (!user) return;
@@ -141,7 +139,6 @@ export function App() {
     [user, toast, userData]
   );
 
-  // === ONBOARDING TAMAMLAMA ===
   const handleOnboardingComplete = async (formData) => {
     if (!user) return;
 
@@ -210,14 +207,14 @@ export function App() {
     }
   };
 
-  // 🧠 WebView'dan gelen mesajları işler (SATIN ALMA)
+  // 🧠 WebView'dan gelen mesajları işler (SATIN ALMA) — kalsın, zarar vermez
   const onWebViewMessage = React.useCallback(
     async (event) => {
       try {
-        const data = JSON.parse(event.nativeEvent.data);
+        const data = JSON.parse(event?.nativeEvent?.data || '{}');
 
         if (data.type === 'START_PURCHASE') {
-          console.log('WebView\'dan ödeme isteği alındı:', data.productId);
+          console.log("WebView'dan ödeme isteği alındı:", data.productId);
           const token = await getSupabaseSessionToken();
           await handlePurchase(
             data.productId,
@@ -234,7 +231,6 @@ export function App() {
     [updateUserData, toast, getSupabaseSessionToken]
   );
 
-  // === INITIAL DATA FETCH ===
   React.useEffect(() => {
     const fetchData = async () => {
       if (user) {
@@ -258,9 +254,7 @@ export function App() {
     );
   }
 
-  if (!user) {
-    return <AuthScreen />;
-  }
+  if (!user) return <AuthScreen />;
 
   if (!userData) {
     return (
@@ -293,26 +287,13 @@ export function App() {
       case 'profile':
         return <Profile userData={userData} updateUserData={updateUserData} />;
       case 'premium':
-  // Web'de normal premium sayfası göster
-  if (typeof window !== 'undefined') {
-    return <PremiumUyelik onPurchaseClick={() => {
-      window.alert("Premium satın alma işlemi sadece mobil uygulamada yapılabilir!");
-      window.location.href = "https://siten.com/app-download"; // ← APK indirme linki
-    }} />;
-  }
-
-  // Native ortam: WebView üzerinden ödeme
-  return (
-    <WebViewComponent
-      ref={webViewRef}
-      source={{ uri: BASE_WEB_URL }}
-      onMessage={onWebViewMessage}
-      javaScriptEnabled={true}
-      injectedJavaScript={`window.activeTab = 'premium'; true;`}
-      style={{ flex: 1, minHeight: 600 }}
-    />
-  );
-
+        return (
+          <PremiumUyelik
+            onPurchaseClick={() => {
+              window.alert("Premium satın alma işlemi sadece mobil uygulamada yapılabilir!");
+            }}
+          />
+        );
       default:
         return (
           <Dashboard
@@ -332,9 +313,7 @@ export function App() {
       </Helmet>
       <div className="mobile-container">
         <Header userData={userData} />
-        <main className="pb-20 pt-16 flex-1 overflow-auto">
-          {renderContent()}
-        </main>
+        <main className="pb-20 pt-16 flex-1 overflow-auto">{renderContent()}</main>
         <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
       </div>
     </>
