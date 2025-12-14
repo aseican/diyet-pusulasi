@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/lib/customSupabaseClient";
@@ -7,22 +7,27 @@ import { v4 as uuidv4 } from "uuid";
 
 const FOOD_BUCKET = "food-images";
 
+const isMobileUA = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+
 function AiFoodAnalyzer() {
   const { toast } = useToast();
+  const inputRef = useRef(null);
 
   const [file, setFile] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState(null);
   const [logs, setLogs] = useState([]);
 
+  const isMobile = useMemo(() => isMobileUA(), []);
+  const hasNative = useMemo(() => !!window?.NativeImage?.pickImageFromGallery, []);
+
   const log = (msg, data) => {
-    const line = `[${new Date().toISOString()}] ${msg} ${
-      data ? JSON.stringify(data) : ""
-    }`;
+    const line = `[${new Date().toISOString()}] ${msg} ${data ? JSON.stringify(data) : ""}`;
     console.log(line);
     setLogs((p) => [...p, line]);
   };
 
+  // Native callback
   useEffect(() => {
     window.__nativeImagePickResult = async (b64, mime) => {
       try {
@@ -40,10 +45,10 @@ function AiFoodAnalyzer() {
         const ext = safeMime.split("/")[1] || "jpg";
         const f = new File([blob], `photo.${ext}`, { type: safeMime });
 
-        log("File constructed", { size: f.size, type: f.type });
+        log("File constructed (native)", { size: f.size, type: f.type });
 
         if (!f.size) {
-          toast({ variant: "destructive", title: "Foto okunamadı" });
+          toast({ variant: "destructive", title: "Foto okunamadı (0 byte)" });
           return;
         }
 
@@ -60,18 +65,46 @@ function AiFoodAnalyzer() {
     };
   }, [toast]);
 
-  const pickPhoto = () => {
-    if (!window?.NativeImage?.pickImageFromGallery) {
-      toast({
-        variant: "destructive",
-        title: "Desteklenmeyen ortam",
-        description: "Bu özellik sadece mobil uygulamada çalışır.",
-      });
+  // Desktop input handler (mobile'de ignore)
+  const onInputChange = (e) => {
+    if (isMobile) {
+      log("Ignoring input change on mobile");
+      if (inputRef.current) inputRef.current.value = "";
       return;
     }
 
-    log("Calling native picker");
-    window.NativeImage.pickImageFromGallery();
+    const f = e.target.files?.[0];
+    log("File picked (input)", { name: f?.name, type: f?.type, size: f?.size });
+
+    if (!f || !f.size) {
+      toast({ variant: "destructive", title: "Dosya alınamadı" });
+      return;
+    }
+
+    setFile(f);
+    setResult(null);
+  };
+
+  // Unified pick
+  const pickPhoto = () => {
+    // Mobile: native zorunlu
+    if (isMobile) {
+      if (!window?.NativeImage?.pickImageFromGallery) {
+        toast({
+          variant: "destructive",
+          title: "Native bridge yok",
+          description:
+            "Bu ekran mobil WebView içinde native picker olmadan foto seçemez. (Chrome/Safari’de deneyin ya da bridge’i ekleyin.)",
+        });
+        return;
+      }
+      log("Calling native picker");
+      window.NativeImage.pickImageFromGallery();
+      return;
+    }
+
+    // Desktop: file input
+    inputRef.current?.click();
   };
 
   const analyze = async () => {
@@ -81,14 +114,16 @@ function AiFoodAnalyzer() {
     setResult(null);
 
     try {
-      const fileName = `${uuidv4()}.jpg`;
-      const filePath = `tmp/${fileName}`;
+      if (!file.size) throw new Error("EMPTY_FILE");
 
-      log("Uploading", { filePath, size: file.size });
+      const extFromType = (file.type || "").split("/")[1] || "jpg";
+      const filePath = `tmp/${uuidv4()}.${extFromType}`;
+
+      log("Uploading", { filePath, size: file.size, type: file.type });
 
       const { error: uploadError } = await supabase.storage
         .from(FOOD_BUCKET)
-        .upload(filePath, file, { contentType: file.type, upsert: false });
+        .upload(filePath, file, { contentType: file.type || "image/jpeg", upsert: false });
 
       if (uploadError) throw uploadError;
 
@@ -120,10 +155,25 @@ function AiFoodAnalyzer() {
 
   return (
     <div className="p-4 space-y-4 max-w-md mx-auto">
+      {/* Desktop-only hidden input */}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={onInputChange}
+      />
+
       <Button onClick={pickPhoto} className="w-full" variant="outline">
         <ImageIcon className="mr-2 h-4 w-4" />
-        Galeriden Foto Seç
+        {isMobile ? "Galeriden Foto Seç (Native)" : "Galeriden Foto Seç"}
       </Button>
+
+      {isMobile && (
+        <div className="text-xs text-gray-500">
+          Native bridge: <b>{hasNative ? "VAR" : "YOK"}</b>
+        </div>
+      )}
 
       {file && (
         <div className="text-sm text-gray-600">
@@ -160,7 +210,4 @@ function AiFoodAnalyzer() {
   );
 }
 
-// ✅ App.jsx bunu bekliyor:
-export const MealTracker = () => {
-  return <AiFoodAnalyzer />;
-};
+export const MealTracker = () => <AiFoodAnalyzer />;
