@@ -109,58 +109,78 @@ export function MealTracker({ addMeal }) {
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
-  // ✅ Native bridge callback (Android WebView)
-  useEffect(() => {
-    // Native tarafın çağıracağı global callback
-    window.__nativeImagePickResult = async (b64, mime) => {
-      try {
-        log("Native received", {
-          hasB64: !!b64,
-          mime,
-          len: b64?.length || 0,
-        });
+useEffect(() => {
+  const receive = async (b64, mime) => {
+    try {
+      log("Native received", { hasB64: !!b64, mime, len: b64?.length || 0 });
 
-        if (!b64) {
-          toast({ title: "Foto seçilmedi" });
-          return;
-        }
-
-        const safeMime = mime || "image/jpeg";
-        const res = await fetch(`data:${safeMime};base64,${b64}`);
-        const blob = await res.blob();
-
-        const ext = guessExtFromMime(safeMime);
-        const f = new File([blob], `native_${Date.now()}.${ext}`, {
-          type: safeMime,
-        });
-
-        if (!f.size) {
-          toast({ variant: "destructive", title: "Foto okunamadı (0 byte)" });
-          return;
-        }
-
-        setFile(f);
-        setResult(null);
-        toast({ title: "Foto seçildi", description: f.name });
-        log("File constructed", { size: f.size, type: f.type });
-      } catch (e) {
-        log("Native decode failed", { message: e?.message });
-        toast({ variant: "destructive", title: "Foto işlenemedi" });
+      if (!b64) {
+        toast({ title: "Foto seçilmedi" });
+        return;
       }
-    };
 
-    // ✅ Eğer native callback component mount olmadan geldiyse buffer’dan yakala
-    if (window.__nativeImagePickBuffer?.b64) {
-      const { b64, mime } = window.__nativeImagePickBuffer;
-      window.__nativeImagePickBuffer = null;
-      window.__nativeImagePickResult(b64, mime);
+      const safeMime = mime || "image/jpeg";
+      const res = await fetch(`data:${safeMime};base64,${b64}`);
+      const blob = await res.blob();
+      const ext = (safeMime.split("/")[1] || "jpg").toLowerCase();
+      const f = new File([blob], `native_${Date.now()}.${ext}`, { type: safeMime });
+
+      if (!f.size) {
+        toast({ variant: "destructive", title: "Foto okunamadı (0 byte)" });
+        return;
+      }
+
+      setFile(f);
+      setResult(null);
+      toast({ title: "Foto seçildi", description: f.name });
+      log("File constructed", { size: f.size, type: f.type });
+    } catch (e) {
+      log("Native decode failed", { message: e?.message });
+      toast({ variant: "destructive", title: "Foto işlenemedi" });
     }
+  };
 
-    return () => {
-      // cleanup (opsiyonel)
-      // window.__nativeImagePickResult = null;
-    };
-  }, [toast]);
+  // ✅ Aynı handler’ı bir sürü olası isme bağla (name mismatch fix)
+  window.__nativeImagePickResult = receive;
+  window.nativeImagePickResult = receive;
+  window.onNativeImagePickResult = receive;
+  window.onImagePicked = receive;
+  window.onImagePickResult = receive;
+
+  // ✅ Bazı implementasyonlar NativeImage objesine callback koyuyor
+  window.NativeImage = window.NativeImage || {};
+  window.NativeImage.onImagePicked = receive;
+  window.NativeImage.onResult = receive;
+
+  // ✅ Native taraf evaluateJavascript yerine postMessage ile yolluyorsa yakala
+  const onMessage = (ev) => {
+    try {
+      const data = typeof ev.data === "string" ? JSON.parse(ev.data) : ev.data;
+      if (!data) return;
+
+      // örnek: { type:"NATIVE_IMAGE_PICK", b64:"...", mime:"image/jpeg" }
+      if (data.type === "NATIVE_IMAGE_PICK" && data.b64) {
+        log("postMessage received", { mime: data.mime, len: data.b64.length });
+        receive(data.b64, data.mime);
+      }
+    } catch {
+      // ignore
+    }
+  };
+  window.addEventListener("message", onMessage);
+
+  // ✅ Çok erken gelmişse buffer’dan yakala
+  if (window.__nativeImagePickBuffer?.b64) {
+    const { b64, mime } = window.__nativeImagePickBuffer;
+    window.__nativeImagePickBuffer = null;
+    receive(b64, mime);
+  }
+
+  return () => {
+    window.removeEventListener("message", onMessage);
+  };
+}, [toast]);
+
 
   const onWebPick = (e) => {
     const f = e.target.files?.[0];
