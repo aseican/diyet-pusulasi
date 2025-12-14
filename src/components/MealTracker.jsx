@@ -278,7 +278,8 @@ export function MealTracker({ addMeal }) {
   }, []);
 
   const handleAddFromAI = useCallback(async () => {
-    const q = searchTerm.trim();
+    const q = stripQuantity(searchTerm.trim());
+
     if (q.length < 2 || addingFromAI) return;
 
     setAddingFromAI(true);
@@ -580,7 +581,22 @@ export function MealTracker({ addMeal }) {
       });
       if (error) throw error;
 
-      setAnalysisResult(data);
+     const firstItem = data?.items?.[0];
+
+if (!firstItem) {
+  throw new Error("AI item bulunamadı");
+}
+
+setAnalysisResult({
+  name: firstItem.name,
+  calories: firstItem.calories_per_100g,
+  protein: firstItem.protein_per_100g,
+  carbs: firstItem.carbs_per_100g,
+  fat: firstItem.fat_per_100g,
+  quantity: 100,
+  unit: "gram",
+});
+
 
       await incrementAiUsage(user.id);
       setDailyUsed((p) => p + 1);
