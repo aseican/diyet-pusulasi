@@ -155,7 +155,12 @@ const getTabFromHash = () => {
   return h === "ai" ? "ai" : "manual";
 };
 
-const [activeTab, setActiveTab] = useState(getTabFromHash);
+
+const [activeTab, setActiveTab] = useState(() => {
+  const h = (window.location.hash || "").replace("#", "");
+  return h === "ai" ? "ai" : "manual";
+});
+
 
 useEffect(() => {
   const onHash = () => setActiveTab(getTabFromHash());
@@ -647,6 +652,12 @@ useEffect(() => {
   }}
   className="w-full"
 >
+  <TabsList className="grid grid-cols-2 w-full">
+    <TabsTrigger value="manual">Manuel Arama</TabsTrigger>
+    <TabsTrigger value="ai">
+      <Zap className="h-4 w-4 mr-1" /> Yapay Zeka
+    </TabsTrigger>
+  </TabsList>
 
 
         {/* MANUEL ARAMA TAB */}
