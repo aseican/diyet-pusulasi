@@ -282,9 +282,13 @@ export function MealTracker({ addMeal }) {
       const token = sessionWrap?.session?.access_token;
 
       const { data, error } = await supabase.functions.invoke("ai-food", {
-        body: { query: q, device_id },
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
+  body: JSON.stringify({ query: q, device_id }),
+  headers: {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  },
+});
+
 
       if (error) {
   // Supabase functions error body'yi ekrana bas
