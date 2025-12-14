@@ -198,20 +198,27 @@ export function MealTracker({ addMeal }) {
   const { user } = useAuth();
 
   // -------- Tabs (controlled + persist) --------
-  const [tab, setTab] = useState(() => {
-    try {
-      return localStorage.getItem("mealtracker_tab") || "manual";
-    } catch {
-      return "manual";
-    }
-  });
+ const PERSIST_MEALTRACKER_TAB = false; // ✅ bunu false bırak: app açılışını asla etkilemesin
 
-  const setTabPersist = (v) => {
-    setTab(v);
-    try {
-      localStorage.setItem("mealtracker_tab", v);
-    } catch {}
-  };
+const TAB_KEY = "dp_mealtracker_tab_v1";
+
+const [tab, setTab] = useState(() => {
+  if (!PERSIST_MEALTRACKER_TAB) return "manual";
+  try {
+    return localStorage.getItem(TAB_KEY) || "manual";
+  } catch {
+    return "manual";
+  }
+});
+
+const setTabPersist = (v) => {
+  setTab(v);
+  if (!PERSIST_MEALTRACKER_TAB) return;
+  try {
+    localStorage.setItem(TAB_KEY, v);
+  } catch {}
+};
+
 
   // -------- Profile / Quota (live) --------
   const [profileTier, setProfileTier] = useState("free");
