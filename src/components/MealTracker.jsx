@@ -98,17 +98,6 @@ export function MealTracker({ addMeal }) {
     setLogs((p) => [...p, line].slice(-200));
   };
 
-  // Preview URL yönetimi
-  useEffect(() => {
-    if (!file) {
-      setPreviewUrl("");
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
-
 useEffect(() => {
   const receive = async (b64, mime) => {
     try {
@@ -122,6 +111,7 @@ useEffect(() => {
       const safeMime = mime || "image/jpeg";
       const res = await fetch(`data:${safeMime};base64,${b64}`);
       const blob = await res.blob();
+
       const ext = (safeMime.split("/")[1] || "jpg").toLowerCase();
       const f = new File([blob], `native_${Date.now()}.${ext}`, { type: safeMime });
 
@@ -140,45 +130,46 @@ useEffect(() => {
     }
   };
 
-  // ✅ Aynı handler’ı bir sürü olası isme bağla (name mismatch fix)
-  window.__nativeImagePickResult = receive;
-  window.nativeImagePickResult = receive;
-  window.onNativeImagePickResult = receive;
-  window.onImagePicked = receive;
-  window.onImagePickResult = receive;
+  // ✅ Global error yakala (native JS string'i patlatıyorsa burada görürüz)
+  window.onerror = (msg, src, line, col, err) => {
+    log("window.onerror", { msg, src, line, col, err: err?.message });
+  };
+  window.onunhandledrejection = (ev) => {
+    log("unhandledrejection", { reason: String(ev?.reason) });
+  };
 
-  // ✅ Bazı implementasyonlar NativeImage objesine callback koyuyor
+  // ✅ Native hangi ismi çağırırsa çağırsın yakala
+  const aliases = [
+    "__nativeImagePickResult",
+    "nativeImagePickResult",
+    "onNativeImagePickResult",
+    "onImagePicked",
+    "onImagePickResult",
+    "receiveNativeImage",
+    "NativeImagePickResult",
+  ];
+  for (const k of aliases) window[k] = receive;
+
+  // ✅ Native bazen window.NativeImage.* üstünden çağırıyor
   window.NativeImage = window.NativeImage || {};
   window.NativeImage.onImagePicked = receive;
   window.NativeImage.onResult = receive;
+  window.NativeImage.__nativeImagePickResult = receive;
 
-  // ✅ Native taraf evaluateJavascript yerine postMessage ile yolluyorsa yakala
+  // ✅ Eğer native postMessage ile yolluyorsa
   const onMessage = (ev) => {
     try {
       const data = typeof ev.data === "string" ? JSON.parse(ev.data) : ev.data;
-      if (!data) return;
-
-      // örnek: { type:"NATIVE_IMAGE_PICK", b64:"...", mime:"image/jpeg" }
-      if (data.type === "NATIVE_IMAGE_PICK" && data.b64) {
-        log("postMessage received", { mime: data.mime, len: data.b64.length });
-        receive(data.b64, data.mime);
-      }
-    } catch {
-      // ignore
-    }
+      if (data?.b64) receive(data.b64, data.mime);
+    } catch {}
   };
   window.addEventListener("message", onMessage);
 
-  // ✅ Çok erken gelmişse buffer’dan yakala
-  if (window.__nativeImagePickBuffer?.b64) {
-    const { b64, mime } = window.__nativeImagePickBuffer;
-    window.__nativeImagePickBuffer = null;
-    receive(b64, mime);
-  }
+  log("Native hooks installed", {
+    hasNativeBridge: !!window?.NativeImage?.pickImageFromGallery,
+  });
 
-  return () => {
-    window.removeEventListener("message", onMessage);
-  };
+  return () => window.removeEventListener("message", onMessage);
 }, [toast]);
 
 
