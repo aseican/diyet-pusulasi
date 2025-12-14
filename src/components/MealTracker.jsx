@@ -37,6 +37,13 @@ function safeNumber(x, fallback = 0) {
   const n = Number(x);
   return Number.isFinite(n) ? n : fallback;
 }
+function stripQuantity(input) {
+  return (input || "")
+    .toLowerCase()
+    .replace(/\b\d+(\.\d+)?\s*(kg|kilo|kilogram|gr|gram|g|adet|porsiyon|bardak|kasik|kaşık)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function guessExtFromMime(mime) {
   const t = (mime || "").toLowerCase();
