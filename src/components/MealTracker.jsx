@@ -7,8 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 
 const FOOD_BUCKET = "food-images";
 
-// Küçük yardımcılar
-function safeJsonStringify(obj) {
+function safeJson(obj) {
   try {
     return JSON.stringify(obj, null, 2);
   } catch {
@@ -25,12 +24,8 @@ function guessExtFromMime(mime) {
 }
 
 function buildMealFromResult(result) {
-  // Supabase function sonucu farklı formatlarda gelebilir.
-  // Burada mümkün olduğunca esnek bir "meal" nesnesi üretmeye çalışıyoruz.
-  // addMeal tarafında ne bekliyorsan onu kolayca uyarlayabilirsin.
   const nowIso = new Date().toISOString();
 
-  // Yaygın olası alan isimleri
   const name =
     result?.foodName ||
     result?.name ||
@@ -70,15 +65,18 @@ function buildMealFromResult(result) {
       carbs: typeof carbs === "number" ? carbs : Number(carbs) || null,
       fat: typeof fat === "number" ? fat : Number(fat) || null,
     },
-    raw: result, // ham sonucu da sakla
+    raw: result,
   };
 }
 
 export function MealTracker({ addMeal }) {
   const { toast } = useToast();
 
-  const [file, setFile] = useState(null);
+  // ✅ File yerine Blob kullanıyoruz (Android WebView uyumluluğu)
+  const [imageBlob, setImageBlob] = useState(null);
+  const [imageMeta, setImageMeta] = useState(null); // {name,type,size}
   const [previewUrl, setPreviewUrl] = useState("");
+
   const [isUploading, setIsUploading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState(null);
@@ -91,94 +89,116 @@ export function MealTracker({ addMeal }) {
 
   const log = (msg, data) => {
     const line = `[${new Date().toISOString()}] ${msg}${
-      data ? ` ${safeJsonStringify(data)}` : ""
+      data ? ` ${safeJson(data)}` : ""
     }`;
     // eslint-disable-next-line no-console
     console.log(line);
-    setLogs((p) => [...p, line].slice(-200));
+    setLogs((p) => [...p, line].slice(-250));
   };
 
-useEffect(() => {
-  const receive = async (b64, mime) => {
-    try {
-      log("Native received", { hasB64: !!b64, mime, len: b64?.length || 0 });
-
-      if (!b64) {
-        toast({ title: "Foto seçilmedi" });
-        return;
-      }
-
-      const safeMime = mime || "image/jpeg";
-      const res = await fetch(`data:${safeMime};base64,${b64}`);
-      const blob = await res.blob();
-
-      const ext = (safeMime.split("/")[1] || "jpg").toLowerCase();
-      const f = new File([blob], `native_${Date.now()}.${ext}`, { type: safeMime });
-
-      if (!f.size) {
-        toast({ variant: "destructive", title: "Foto okunamadı (0 byte)" });
-        return;
-      }
-
-      setFile(f);
-      setResult(null);
-      toast({ title: "Foto seçildi", description: f.name });
-      log("File constructed", { size: f.size, type: f.type });
-    } catch (e) {
-      log("Native decode failed", { message: e?.message });
-      toast({ variant: "destructive", title: "Foto işlenemedi" });
+  // Preview URL
+  useEffect(() => {
+    if (!imageBlob) {
+      setPreviewUrl("");
+      return;
     }
-  };
+    const url = URL.createObjectURL(imageBlob);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [imageBlob]);
 
-  // ✅ Global error yakala (native JS string'i patlatıyorsa burada görürüz)
-  window.onerror = (msg, src, line, col, err) => {
-    log("window.onerror", { msg, src, line, col, err: err?.message });
-  };
-  window.onunhandledrejection = (ev) => {
-    log("unhandledrejection", { reason: String(ev?.reason) });
-  };
+  // ✅ Native callback + error capture
+  useEffect(() => {
+    const receive = async (b64, mime) => {
+      try {
+        log("Native received", { hasB64: !!b64, mime, len: b64?.length || 0 });
 
-  // ✅ Native hangi ismi çağırırsa çağırsın yakala
-  const aliases = [
-    "__nativeImagePickResult",
-    "nativeImagePickResult",
-    "onNativeImagePickResult",
-    "onImagePicked",
-    "onImagePickResult",
-    "receiveNativeImage",
-    "NativeImagePickResult",
-  ];
-  for (const k of aliases) window[k] = receive;
+        if (!b64) {
+          toast({ title: "Foto seçilmedi" });
+          return;
+        }
 
-  // ✅ Native bazen window.NativeImage.* üstünden çağırıyor
-  window.NativeImage = window.NativeImage || {};
-  window.NativeImage.onImagePicked = receive;
-  window.NativeImage.onResult = receive;
-  window.NativeImage.__nativeImagePickResult = receive;
+        const safeMime = mime || "image/jpeg";
+        const res = await fetch(`data:${safeMime};base64,${b64}`);
+        const blob = await res.blob();
 
-  // ✅ Eğer native postMessage ile yolluyorsa
-  const onMessage = (ev) => {
-    try {
-      const data = typeof ev.data === "string" ? JSON.parse(ev.data) : ev.data;
-      if (data?.b64) receive(data.b64, data.mime);
-    } catch {}
-  };
-  window.addEventListener("message", onMessage);
+        if (!blob || !blob.size) {
+          toast({ variant: "destructive", title: "Foto okunamadı (0 byte)" });
+          return;
+        }
 
-  log("Native hooks installed", {
-    hasNativeBridge: !!window?.NativeImage?.pickImageFromGallery,
-  });
+        const ext = guessExtFromMime(safeMime);
+        const name = `native_${Date.now()}.${ext}`;
 
-  return () => window.removeEventListener("message", onMessage);
-}, [toast]);
+        setImageBlob(blob);
+        setImageMeta({ name, type: safeMime, size: blob.size });
+        setResult(null);
 
+        toast({ title: "Foto seçildi", description: name });
+        log("Blob ready", { size: blob.size, type: safeMime, name });
+      } catch (e) {
+        log("Native decode failed", { message: e?.message });
+        toast({ variant: "destructive", title: "Foto işlenemedi" });
+      }
+    };
+
+    window.onerror = (msg, src, line, col, err) => {
+      log("window.onerror", { msg, src, line, col, err: err?.message });
+    };
+    window.onunhandledrejection = (ev) => {
+      log("unhandledrejection", { reason: String(ev?.reason) });
+    };
+
+    // callback alias’ları
+    const aliases = [
+      "__nativeImagePickResult",
+      "nativeImagePickResult",
+      "onNativeImagePickResult",
+      "onImagePicked",
+      "onImagePickResult",
+      "receiveNativeImage",
+      "NativeImagePickResult",
+    ];
+    for (const k of aliases) window[k] = receive;
+
+    window.NativeImage = window.NativeImage || {};
+    window.NativeImage.onImagePicked = receive;
+    window.NativeImage.onResult = receive;
+
+    // postMessage support (opsiyonel)
+    const onMessage = (ev) => {
+      try {
+        const data = typeof ev.data === "string" ? JSON.parse(ev.data) : ev.data;
+        if (data?.b64) receive(data.b64, data.mime);
+      } catch {}
+    };
+    window.addEventListener("message", onMessage);
+
+    // buffer yakala
+    if (window.__nativeImagePickBuffer?.b64) {
+      const { b64, mime } = window.__nativeImagePickBuffer;
+      window.__nativeImagePickBuffer = null;
+      receive(b64, mime);
+    }
+
+    log("Native hooks installed", {
+      hasNativeBridge: !!window?.NativeImage?.pickImageFromGallery,
+      fileCtor: typeof window.File,
+    });
+
+    return () => window.removeEventListener("message", onMessage);
+  }, [toast]);
 
   const onWebPick = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    setFile(f);
+
+    // Web’de File var, ama biz yine Blob gibi kullanacağız
+    setImageBlob(f);
+    setImageMeta({ name: f.name, type: f.type || "image/jpeg", size: f.size });
     setResult(null);
-    log("Web picked file", { name: f.name, size: f.size, type: f.type });
+
+    log("Web picked", { name: f.name, size: f.size, type: f.type });
   };
 
   const pickFromNative = () => {
@@ -200,22 +220,27 @@ useEffect(() => {
     }
   };
 
-  const uploadToSupabase = async (selectedFile) => {
-    const mime = selectedFile?.type || "image/jpeg";
-    const ext = guessExtFromMime(mime);
+  const uploadToSupabase = async () => {
+    const blob = imageBlob;
+    const meta = imageMeta;
+
+    if (!blob || !meta?.type) throw new Error("NO_IMAGE");
+
+    const ext = guessExtFromMime(meta.type);
     const filePath = `tmp/${uuidv4()}.${ext}`;
 
-    log("Uploading to storage", {
+    log("Uploading", {
       bucket: FOOD_BUCKET,
       filePath,
-      size: selectedFile.size,
-      type: mime,
+      size: blob.size,
+      type: meta.type,
     });
 
+    // ✅ Blob upload
     const { error: uploadError } = await supabase.storage
       .from(FOOD_BUCKET)
-      .upload(filePath, selectedFile, {
-        contentType: mime,
+      .upload(filePath, blob, {
+        contentType: meta.type,
         upsert: false,
       });
 
@@ -232,29 +257,25 @@ useEffect(() => {
   };
 
   const analyze = async () => {
-    if (!file || isAnalyzing || isUploading) return;
+    if (!imageBlob || !imageMeta?.size) return;
+    if (isUploading || isAnalyzing) return;
 
     setIsUploading(true);
     setIsAnalyzing(true);
     setResult(null);
 
     try {
-      // 1) Upload
-      const { imageUrl } = await uploadToSupabase(file);
+      const { imageUrl } = await uploadToSupabase();
       setIsUploading(false);
 
-      // 2) Session token
       const {
         data: { session },
       } = await supabase.auth.getSession();
 
-      if (!session?.access_token) {
-        throw new Error("NO_SESSION");
-      }
+      if (!session?.access_token) throw new Error("NO_SESSION");
 
       log("Calling function analyze-food-image", { imageUrl });
 
-      // 3) Invoke function
       const { data, error } = await supabase.functions.invoke(
         "analyze-food-image",
         {
@@ -291,80 +312,60 @@ useEffect(() => {
       });
       return;
     }
-
-    try {
-      const meal = buildMealFromResult(result);
-      addMeal(meal);
-      toast({ title: "Öğün eklendi", description: meal.name });
-      log("Meal pushed to addMeal()", { mealPreview: { id: meal.id, name: meal.name } });
-    } catch (e) {
-      log("addMeal failed", { message: e?.message });
-      toast({ variant: "destructive", title: "Öğün eklenemedi" });
-    }
+    const meal = buildMealFromResult(result);
+    addMeal(meal);
+    toast({ title: "Öğün eklendi", description: meal.name });
+    log("Meal pushed", { id: meal.id, name: meal.name });
   };
 
   const busy = isUploading || isAnalyzing;
+  const canAnalyze = !!imageBlob && !!imageMeta?.size && !busy;
 
   return (
     <div className="p-4 space-y-4 max-w-md mx-auto">
-      <div className="space-y-2">
+      <div className="space-y-1">
         <div className="text-lg font-semibold">Öğün Ekle (MealTracker)</div>
         <div className="text-sm text-muted-foreground">
           Web’de dosya seç, Android’de native picker varsa onu kullan.
         </div>
       </div>
 
-      {/* Native picker */}
       <Button
         onClick={pickFromNative}
         className="w-full"
         variant={nativeAvailable ? "outline" : "secondary"}
         disabled={!nativeAvailable}
-        title={nativeAvailable ? "" : "Native bridge yok"}
       >
         <ImageIcon className="mr-2 h-4 w-4" />
         Galeriden Foto Seç (Native)
       </Button>
 
-      {/* Web picker */}
       <label className="block">
         <div className="mb-2 text-sm text-muted-foreground">
           Web/PC için dosya seç:
         </div>
         <div className="flex items-center gap-2">
-          <input
-            type="file"
-            accept="image/*"
-            onChange={onWebPick}
-            className="block w-full text-sm"
-          />
+          <input type="file" accept="image/*" onChange={onWebPick} />
           <Upload className="h-4 w-4 opacity-60" />
         </div>
       </label>
 
-      {/* Selected file info */}
-      {file && (
+      {imageMeta && (
         <div className="text-sm">
-          Seçilen dosya: <b>{file.name}</b> ({file.size} bytes)
+          Seçilen: <b>{imageMeta.name}</b> ({imageMeta.size} bytes)
         </div>
       )}
 
-      {/* Preview */}
       {previewUrl && (
         <div className="rounded border overflow-hidden">
-          <img
-            src={previewUrl}
-            alt="Seçilen görsel"
-            className="w-full h-auto block"
-          />
+          <img src={previewUrl} alt="Seçilen görsel" className="w-full h-auto block" />
         </div>
       )}
 
-      {/* Analyze */}
       <Button
         onClick={analyze}
-        disabled={!file || busy}
-        className="w-full bg-emerald-600 hover:bg-emerald-700"
+        disabled={!canAnalyze}
+        className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
       >
         {busy ? (
           <>
@@ -376,23 +377,20 @@ useEffect(() => {
         )}
       </Button>
 
-      {/* Result */}
       {result && (
         <div className="space-y-2">
           <div className="text-sm font-semibold">Analiz Sonucu</div>
           <pre className="p-3 bg-gray-100 rounded text-xs overflow-auto max-h-64">
-            {safeJsonStringify(result)}
+            {safeJson(result)}
           </pre>
 
-          {/* addMeal bağlantısı */}
-          <Button onClick={pushToApp} className="w-full" variant="default">
+          <Button onClick={pushToApp} className="w-full">
             <Plus className="mr-2 h-4 w-4" />
             Öğün Olarak Ekle
           </Button>
         </div>
       )}
 
-      {/* Debug */}
       <details className="text-xs text-gray-500">
         <summary>Debug Log</summary>
         <pre className="whitespace-pre-wrap">{logs.join("\n")}</pre>
