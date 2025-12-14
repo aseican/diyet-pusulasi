@@ -285,47 +285,66 @@ useEffect(() => {
   }, [aiFile]);
 
   // ✅ Native Android picker callback: window.__nativeImagePickResult(b64, mime)
-  useEffect(() => {
-    window.__nativeImagePickResult = (b64, mime) => {
-      try {
-        if (!b64) {
-          debugLog("Native pick cancelled / empty");
-          return;
-        }
+useEffect(() => {
+  window.__nativeImagePickResult = async (b64, mime) => {
+    try {
+      debugLog("Native pick result received", {
+        hasB64: !!b64,
+        mime: mime || null,
+        b64Len: b64 ? b64.length : 0,
+      });
 
-        const byteChars = atob(b64);
-        const byteNumbers = new Array(byteChars.length);
-        for (let i = 0; i < byteChars.length; i++) {
-          byteNumbers[i] = byteChars.charCodeAt(i);
-        }
-
-        const blob = new Blob([new Uint8Array(byteNumbers)], {
-          type: mime || "image/jpeg",
+      if (!b64) {
+        toast({
+          variant: "destructive",
+          title: "Foto seçilmedi",
+          description: "İptal edildi.",
         });
-
-        const ext = (mime?.split("/")?.[1] || "jpg").toLowerCase();
-        const file = new File([blob], `native_photo.${ext}`, {
-          type: mime || "image/jpeg",
-        });
-
-        debugLog("Native file constructed", { name: file.name, type: file.type, size: file.size });
-
-        setAiFile(file);
-        setAnalysisResult(null);
-        setActiveTab("ai");
-
-        if (fileInputRef.current) fileInputRef.current.value = "";
-      } catch (e) {
-        debugLog("Native pick decode failed", { message: e?.message, name: e?.name });
+        return;
       }
-    };
 
-    return () => {
-      // cleanup (optional)
-      // eslint-disable-next-line no-underscore-dangle
-      window.__nativeImagePickResult = undefined;
-    };
-  }, [debugLog]);
+      const safeMime = mime || "image/jpeg";
+
+      // ✅ Android WebView'da en stabil yöntem: data URL -> blob
+      const res = await fetch(`data:${safeMime};base64,${b64}`);
+      const blob = await res.blob();
+
+      const ext = (safeMime.split("/")[1] || "jpg").toLowerCase();
+      const file = new File([blob], `native_${Date.now()}.${ext}`, { type: safeMime });
+
+      debugLog("Native file constructed", { name: file.name, type: file.type, size: file.size });
+
+      if (!file.size || file.size <= 0) {
+        toast({
+          variant: "destructive",
+          title: "Foto okunamadı",
+          description: "Dosya boyutu 0 görünüyor.",
+        });
+        return;
+      }
+
+      setAiFile(file);
+      setAnalysisResult(null);
+      setActiveTab("ai");
+
+      if (fileInputRef.current) fileInputRef.current.value = "";
+
+      toast({ title: "Foto seçildi", description: "Analiz edebilirsin." });
+    } catch (e) {
+      debugLog("Native pick decode failed", { message: e?.message, name: e?.name });
+      toast({
+        variant: "destructive",
+        title: "Foto işlenemedi",
+        description: e?.message || "Bilinmeyen hata",
+      });
+    }
+  };
+
+  return () => {
+    window.__nativeImagePickResult = undefined;
+  };
+}, [debugLog, toast, fileInputRef]);
+
 
   // =====================================================
   //                     SEARCH FOODS
