@@ -603,6 +603,23 @@ export function MealTracker({ addMeal }) {
     if (category === "ara_ogun") return <Apple {...p} />;
     return <Utensils {...p} />;
   };
+  const norm = (s) =>
+    (s || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .replace(/ı/g, "i")
+      .replace(/ğ/g, "g")
+      .replace(/ş/g, "s")
+      .replace(/ö/g, "o")
+      .replace(/ü/g, "u")
+      .replace(/ç/g, "c");
+
+  const qNorm = norm(searchTerm);
+  const hasExactMatch = useMemo(() => {
+    if (qNorm.length < 2) return false;
+    return (searchResults || []).some((f) => norm(f?.name_tr) === qNorm);
+  }, [qNorm, searchResults]);
 
   const calculatedMacros = selectedFood
     ? (() => {
@@ -677,6 +694,25 @@ export function MealTracker({ addMeal }) {
               )}
             </AnimatePresence>
           </div>
+{!loadingSearch && searchTerm.trim().length >= 2 && !hasExactMatch && (
+  <Button
+    onClick={handleAddFromAI}
+    disabled={addingFromAI}
+    className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60"
+  >
+    {addingFromAI ? (
+      <>
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        Ekleniyor...
+      </>
+    ) : (
+      <>
+        <Zap className="mr-2 h-4 w-4" />
+        "{searchTerm.trim()}" AI ile ekle (ücretsiz)
+      </>
+    )}
+  </Button>
+)}
 
           {!loadingSearch && searchResults.length === 0 && searchTerm.trim().length >= 2 && (
             <div className="space-y-2">
