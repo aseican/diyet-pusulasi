@@ -213,9 +213,13 @@ export const Progress = ({ userData }) => {
         locale: "tr-TR",
       };
 
-      const { data, error } = await supabase.functions.invoke("generate-progress-insights", {
-        body: payload,
-      });
+      const { data: { session } } = await supabase.auth.getSession();
+
+const { data, error } = await supabase.functions.invoke("generate-progress-insights", {
+  body: payload,
+  headers: { Authorization: `Bearer ${session?.access_token}` },
+});
+
 
       if (error) throw error;
 
