@@ -1,8 +1,9 @@
 // ======================================================================
-//                        FIXED & STABLE MealTracker.jsx
+//                        REBUILT & STABLE MealTracker.jsx
+//      (UI preserved, photo picking/upload/analyze logic rewritten)
 // ======================================================================
 
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/customSupabaseClient";
 import { Input } from "@/components/ui/input";
@@ -42,30 +43,16 @@ import { v4 as uuidv4 } from "uuid";
 
 const FOOD_BUCKET = "food-images";
 
-// -----------------------------
-// PLAN LIMITS (DB kolonlarına göre)
-// -----------------------------
 const PLAN_LIMITS = {
   free: { daily: 3, monthly: 3 },
   basic: { daily: 10, monthly: 30 },
   pro: { daily: 20, monthly: 60 },
   kapsamli: { daily: 99999, monthly: 99999 },
-
-  // Google Play productId’ler
   sub_premium_monthly: { daily: 30, monthly: 1000 },
   sub_pro_monthly: { daily: 50, monthly: 2000 },
   sub_unlimited_monthly: { daily: 99999, monthly: 99999 },
 };
 
-// -----------------------------
-// QUOTA CHECK + RESET (profiles kolonlarına göre)
-// Beklenen kolonlar:
-// - plan_tier
-// - ai_daily_used
-// - ai_monthly_used
-// - ai_last_use_date  (YYYY-MM-DD)
-// - ai_last_use_month (YYYY-MM)
-// -----------------------------
 async function checkAndUpdateQuota(supabaseClient, userId) {
   const { data: user, error } = await supabaseClient
     .from("profiles")
@@ -83,7 +70,6 @@ async function checkAndUpdateQuota(supabaseClient, userId) {
   let dailyUsed = user.ai_daily_used ?? 0;
   let monthlyUsed = user.ai_monthly_used ?? 0;
 
-  // Günlük reset
   if (user.ai_last_use_date !== today) {
     dailyUsed = 0;
     await supabaseClient
@@ -92,7 +78,6 @@ async function checkAndUpdateQuota(supabaseClient, userId) {
       .eq("id", userId);
   }
 
-  // Aylık reset
   if (user.ai_last_use_month !== month) {
     monthlyUsed = 0;
     await supabaseClient
@@ -101,7 +86,6 @@ async function checkAndUpdateQuota(supabaseClient, userId) {
       .eq("id", userId);
   }
 
-  // Limit kontrol
   if (dailyUsed >= limits.daily)
     return { allowed: false, reason: "DAILY_LIMIT_REACHED", quota: { dailyUsed, limits } };
 
@@ -137,106 +121,21 @@ async function incrementAiUsage(supabaseClient, userId) {
     .eq("id", userId);
 }
 
-// -----------------------------
-// Optional: HEIC normalize (istersen sonra ekleriz)
-// Şimdilik direkt file döndürüyoruz (stabil olsun)
-// -----------------------------
-async function normalizeImageFile(file) {
-  return file;
+function detectMobileUA() {
+  try {
+    return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+  } catch {
+    return false;
+  }
 }
 
 export const MealTracker = ({ addMeal }) => {
   const { toast } = useToast();
   const { user, userData } = useAuth();
 
-  // ✅ Tabs state (kalıcı + stabil)
-  const getTabFromHash = () => {
-    const h = (window.location.hash || "").replace("#", "");
-    return h === "ai" ? "ai" : "manual";
-  };
-
-  const [activeTab, setActiveTab] = useState(() => {
-    const h = (window.location.hash || "").replace("#", "");
-    return h === "ai" ? "ai" : "manual";
-  });
-
-  useEffect(() => {
-    const onHash = () => setActiveTab(getTabFromHash());
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
-
-  // Kullanıcı planı (UI için)
-  const currentPlan = userData?.plan_tier || "free";
-  const quotaLimit = PLAN_LIMITS[currentPlan]?.daily ?? PLAN_LIMITS.free.daily;
-  const currentQuota = Number(userData?.ai_daily_used ?? 0);
-  const isQuotaReached = currentQuota >= quotaLimit;
-
-  // STATE'LER
-  const [searchTerm, setSearchTerm] = useState("");
-  const [searchResults, setSearchResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  const [selectedFood, setSelectedFood] = useState(null);
-  const [quantity, setQuantity] = useState(100);
-  const [unit, setUnit] = useState("gram");
-  const [mealType, setMealType] = useState("Kahvaltı");
-
-  // AI FOTOĞRAF STATE
-  const fileInputRef = useRef(null);
-  const [aiFile, setAiFile] = useState(null);
-
-  // ✅ Native mevcut mu?
-  const isNativeAvailable = !!window?.NativeImage?.pickImageFromGallery;
-
-  // Foto seçildiyse her zaman AI tab'da kal
-  useEffect(() => {
-    if (aiFile) {
-      setActiveTab("ai");
-      try {
-        localStorage.setItem("mealtracker_activeTab", "ai");
-      } catch {}
-    }
-  }, [aiFile]);
-
-  // Galeriden geri dönünce tab'ı tekrar AI'ye çek
-  useEffect(() => {
-    if (aiFile) {
-      setActiveTab("ai");
-      window.location.hash = "ai";
-    }
-  }, [aiFile]);
-
-  // =====================================================
-  // GALERİDEN GERİ DÖNÜŞTE AI TAB'A KİLİT (KESİN ÇÖZÜM)
-  // =====================================================
-  useEffect(() => {
-    const restoreTab = () => {
-      if (aiFile) {
-        setActiveTab("ai");
-        window.location.hash = "ai";
-      }
-    };
-
-    // Galeri -> uygulamaya dönüş
-    window.addEventListener("focus", restoreTab);
-
-    // Arka plan / ön plan geçişleri
-    const onVisibilityChange = () => {
-      if (!document.hidden) restoreTab();
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-
-    return () => {
-      window.removeEventListener("focus", restoreTab);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, [aiFile]);
-
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState(null);
-
-  // AI debug logs
+  // -----------------------------
+  // Stable debug logger (unchanged UI)
+  // -----------------------------
   const [aiDebugLogs, setAiDebugLogs] = useState([]);
   const [showAiDebug, setShowAiDebug] = useState(false);
 
@@ -252,12 +151,8 @@ export const MealTracker = ({ addMeal }) => {
               return String(data);
             }
           })()}`;
-
-    // console
     // eslint-disable-next-line no-console
     console.log(line);
-
-    // on-screen
     setAiDebugLogs((prev) => {
       const next = [...prev, line];
       return next.length > 200 ? next.slice(next.length - 200) : next;
@@ -265,12 +160,11 @@ export const MealTracker = ({ addMeal }) => {
   }, []);
 
   const clearDebug = useCallback(() => setAiDebugLogs([]), []);
-
   const copyDebugToClipboard = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(aiDebugLogs.join("\n"));
       toast({ title: "Kopyalandı", description: "Debug logları panoya kopyalandı." });
-    } catch (e) {
+    } catch {
       toast({
         variant: "destructive",
         title: "Kopyalanamadı",
@@ -279,12 +173,226 @@ export const MealTracker = ({ addMeal }) => {
     }
   }, [aiDebugLogs, toast]);
 
-  // ✅ Foto seçilince AI tab’a kilitle (geri dönme hissini bitirir)
+  // -----------------------------
+  // Tabs
+  // -----------------------------
+  const getTabFromHash = () => {
+    const h = (window.location.hash || "").replace("#", "");
+    return h === "ai" ? "ai" : "manual";
+  };
+
+  const [activeTab, setActiveTab] = useState(() => getTabFromHash());
   useEffect(() => {
-    if (aiFile) setActiveTab("ai");
+    const onHash = () => setActiveTab(getTabFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  // -----------------------------
+  // Quota
+  // -----------------------------
+  const currentPlan = userData?.plan_tier || "free";
+  const quotaLimit = PLAN_LIMITS[currentPlan]?.daily ?? PLAN_LIMITS.free.daily;
+  const currentQuota = Number(userData?.ai_daily_used ?? 0);
+  const isQuotaReached = currentQuota >= quotaLimit;
+
+  // -----------------------------
+  // Manual search
+  // -----------------------------
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const [selectedFood, setSelectedFood] = useState(null);
+  const [quantity, setQuantity] = useState(100);
+  const [unit, setUnit] = useState("gram");
+  const [mealType, setMealType] = useState("Kahvaltı");
+
+  const searchFoods = useCallback(async () => {
+    if (searchTerm.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("foods")
+      .select("id, name_tr, calories, protein, carbs, fat, unit_gram, category")
+      .ilike("name_tr", `%${searchTerm}%`)
+      .limit(50);
+
+    if (error) {
+      toast({
+        variant: "destructive",
+        title: "Arama Hatası",
+        description: "Yiyecekler aranırken bir hata oluştu.",
+      });
+    } else {
+      setSearchResults(data || []);
+    }
+
+    setLoading(false);
+  }, [searchTerm, toast]);
+
+  useEffect(() => {
+    const t = setTimeout(searchFoods, 300);
+    return () => clearTimeout(t);
+  }, [searchTerm, searchFoods]);
+
+  const getMultiplier = (unitValue, qty, food) => {
+    let totalGram = 0;
+    switch (unitValue) {
+      case "gram":
+        totalGram = qty;
+        break;
+      case "adet":
+        totalGram = qty * (food.unit_gram || 100);
+        break;
+      case "porsiyon":
+      case "bardak":
+        totalGram = qty * 200;
+        break;
+      case "kasik":
+        totalGram = qty * 15;
+        break;
+      default:
+        totalGram = qty;
+    }
+    return totalGram / 100;
+  };
+
+  const handleAddMealManual = () => {
+    if (!selectedFood) return;
+
+    const qty = Number(quantity) || 0;
+    if (qty <= 0) {
+      toast({
+        variant: "destructive",
+        title: "Eksik Bilgi",
+        description: "Lütfen miktarı giriniz.",
+      });
+      return;
+    }
+
+    const mult = getMultiplier(unit, qty, selectedFood);
+
+    const meal = {
+      meal_type: mealType,
+      food_name: selectedFood.name_tr,
+      calories: Number((selectedFood.calories ?? 0) * mult),
+      protein: Number((selectedFood.protein ?? 0) * mult),
+      carbs: Number((selectedFood.carbs ?? 0) * mult),
+      fat: Number((selectedFood.fat ?? 0) * mult),
+      quantity: qty,
+      unit,
+      user_id: user?.id,
+      date: new Date().toISOString().split("T")[0],
+    };
+
+    addMeal(meal);
+
+    setSelectedFood(null);
+    setSearchTerm("");
+    setSearchResults([]);
+
+    toast({
+      title: "Öğün Eklendi",
+      description: `${meal.food_name} başarıyla eklendi.`,
+    });
+  };
+
+  // -----------------------------
+  // AI: picking/upload/analyze (REBUILT)
+  // -----------------------------
+  const fileInputRef = useRef(null);
+  const [aiFile, setAiFile] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState(null);
+
+  const isMobile = useMemo(() => detectMobileUA(), []);
+  const isNativeAvailable = useMemo(
+    () => !!window?.NativeImage?.pickImageFromGallery,
+    []
+  );
+
+  // keep AI tab when file exists
+  useEffect(() => {
+    if (aiFile) {
+      setActiveTab("ai");
+      window.location.hash = "ai";
+      try {
+        localStorage.setItem("mealtracker_activeTab", "ai");
+      } catch {}
+    }
   }, [aiFile]);
 
-  // ✅ Native Android picker callback: window.__nativeImagePickResult(b64, mime)
+  // restore tab on focus/visibility
+  useEffect(() => {
+    const restoreTab = () => {
+      if (aiFile) {
+        setActiveTab("ai");
+        window.location.hash = "ai";
+      }
+    };
+    window.addEventListener("focus", restoreTab);
+    const onVis = () => {
+      if (!document.hidden) restoreTab();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("focus", restoreTab);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [aiFile]);
+
+  const removePhoto = () => {
+    setAiFile(null);
+    setAnalysisResult(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // Desktop-only file input handler
+  const handleFileChange = (e) => {
+    // ✅ Critical: if mobile and/or native flow is expected, ignore phantom change events.
+    if (isMobile) {
+      debugLog("Ignoring file input change on mobile (phantom bug guard)");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    const f = e.target.files?.[0];
+    debugLog("File picked (input)", { name: f?.name, type: f?.type, size: f?.size });
+
+    if (!f || !f.size) {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      toast({
+        variant: "destructive",
+        title: "Foto okunamadı",
+        description: "Dosya alınamadı. Lütfen tekrar deneyin.",
+      });
+      return;
+    }
+
+    setAiFile(f);
+    setAnalysisResult(null);
+    setActiveTab("ai");
+  };
+
+  // Native picker open (mobile/webview)
+  const openNativePicker = () => {
+    try {
+      if (window?.NativeImage?.pickImageFromGallery) {
+        debugLog("Calling native gallery picker");
+        window.NativeImage.pickImageFromGallery();
+        return true;
+      }
+    } catch (e) {
+      debugLog("Native picker call failed", { message: e?.message });
+    }
+    return false;
+  };
+
+  // Native callback
   useEffect(() => {
     window.__nativeImagePickResult = async (b64, mime) => {
       try {
@@ -304,8 +412,6 @@ export const MealTracker = ({ addMeal }) => {
         }
 
         const safeMime = mime || "image/jpeg";
-
-        // ✅ Android WebView'da en stabil yöntem: data URL -> blob
         const res = await fetch(`data:${safeMime};base64,${b64}`);
         const blob = await res.blob();
 
@@ -343,168 +449,28 @@ export const MealTracker = ({ addMeal }) => {
     return () => {
       window.__nativeImagePickResult = undefined;
     };
-  }, [debugLog, toast, fileInputRef]);
+  }, [debugLog, toast]);
 
-  // =====================================================
-  //                     SEARCH FOODS
-  // =====================================================
-  const searchFoods = useCallback(async () => {
-    if (searchTerm.trim().length < 2) {
-      setSearchResults([]);
-      return;
-    }
-
-    setLoading(true);
-
-    const { data, error } = await supabase
-      .from("foods")
-      .select("id, name_tr, calories, protein, carbs, fat, unit_gram, category")
-      .ilike("name_tr", `%${searchTerm}%`)
-      .limit(50);
-
-    if (error) {
-      toast({
-        variant: "destructive",
-        title: "Arama Hatası",
-        description: "Yiyecekler aranırken bir hata oluştu.",
-      });
-    } else {
-      setSearchResults(data || []);
-    }
-
-    setLoading(false);
-  }, [searchTerm, toast]);
-
-  useEffect(() => {
-    const t = setTimeout(searchFoods, 300);
-    return () => clearTimeout(t);
-  }, [searchTerm, searchFoods]);
-
-  // =====================================================
-  //                MANUEL YEMEK EKLEME
-  // =====================================================
-  const getMultiplier = (unitValue, qty, food) => {
-    let totalGram = 0;
-
-    switch (unitValue) {
-      case "gram":
-        totalGram = qty;
-        break;
-      case "adet":
-        totalGram = qty * (food.unit_gram || 100);
-        break;
-      case "porsiyon":
-        totalGram = qty * 200;
-        break;
-      case "bardak":
-        totalGram = qty * 200;
-        break;
-      case "kasik":
-        totalGram = qty * 15;
-        break;
-      default:
-        totalGram = qty;
-    }
-
-    // foods tablosu 100g bazlı ise:
-    return totalGram / 100;
-  };
-
-  const handleAddMealManual = () => {
-    if (!selectedFood) return;
-
-    const qty = Number(quantity) || 0;
-    if (qty <= 0) {
-      toast({
-        variant: "destructive",
-        title: "Eksik Bilgi",
-        description: "Lütfen miktarı giriniz.",
-      });
-      return;
-    }
-
-    const mult = getMultiplier(unit, qty, selectedFood);
-
-    const meal = {
-      meal_type: mealType,
-      food_name: selectedFood.name_tr,
-      calories: Number((selectedFood.calories ?? 0) * mult),
-      protein: Number((selectedFood.protein ?? 0) * mult),
-      carbs: Number((selectedFood.carbs ?? 0) * mult),
-      fat: Number((selectedFood.fat ?? 0) * mult),
-      quantity: qty,
-      unit,
-      user_id: user.id,
-      date: new Date().toISOString().split("T")[0],
-    };
-
-    addMeal(meal);
-
-    setSelectedFood(null);
-    setSearchTerm("");
-    setSearchResults([]);
-
-    toast({
-      title: "Öğün Eklendi",
-      description: `${meal.food_name} başarıyla eklendi.`,
-    });
-  };
-
-  // =====================================================
-  //                     AI ANALYZE
-  // =====================================================
-  const handleFileChange = (e) => {
-    // ✅ FIX: Native bridge varken Web input change event'i mobilde phantom/0-byte geliyor.
-    // Bu durumda tamamen ignore ediyoruz.
-    if (isNativeAvailable) {
-      debugLog("Ignoring file input change (native available)");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
-
-    if (e.target.files?.length > 0) {
-      const f = e.target.files[0];
-
-      debugLog("File picked (input)", { name: f?.name, type: f?.type, size: f?.size });
-
-      // desktop/browser'da da 0 byte gelirse engelle
-      if (!f?.size || f.size === 0) {
+  // One unified "pick" action:
+  const pickPhoto = () => {
+    // Mobile: never use <input> (phantom 0-byte bug)
+    if (isMobile) {
+      const ok = openNativePicker();
+      if (!ok) {
         toast({
           variant: "destructive",
-          title: "Foto okunamadı",
-          description: "Seçilen dosya boş görünüyor (0 byte). Lütfen tekrar deneyin.",
+          title: "Foto seçimi desteklenmiyor",
+          description:
+            "Bu uygulama içi tarayıcı fotoğraf seçimini aktarmıyor. Lütfen Chrome/Safari’de açın.",
         });
-        if (fileInputRef.current) fileInputRef.current.value = "";
-        return;
       }
-
-      setAiFile(f);
-      setAnalysisResult(null);
-      setActiveTab("ai");
+      return;
     }
-  };
 
-  const removePhoto = () => {
-    setAiFile(null);
-    setAnalysisResult(null);
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  };
-
-  const openNativePickerIfExists = () => {
-    try {
-      // Android WebView bridge: NativeImage.pickImageFromGallery()
-      if (window?.NativeImage?.pickImageFromGallery) {
-        debugLog("Calling native gallery picker");
-        window.NativeImage.pickImageFromGallery();
-        return true;
-      }
-    } catch (e) {
-      debugLog("Native picker call failed", { message: e?.message });
-    }
-    return false;
+    // Desktop: use native if exists else file input
+    const ok = openNativePicker();
+    if (ok) return;
+    document.getElementById("upload-ai")?.click();
   };
 
   const handleAnalyze = async () => {
@@ -513,7 +479,6 @@ export const MealTracker = ({ addMeal }) => {
     setIsAnalyzing(true);
     setAnalysisResult(null);
 
-    // 1) quota
     const quota = await checkAndUpdateQuota(supabase, user.id);
     if (!quota.allowed) {
       toast({
@@ -529,27 +494,8 @@ export const MealTracker = ({ addMeal }) => {
     }
 
     try {
-      // 2) upload
-      const normalizedFile = await normalizeImageFile(aiFile);
-
-      const safeName = normalizedFile?.name || aiFile?.name || "";
-      const extFromName = safeName.includes(".") ? safeName.split(".").pop() : null;
-      const extFromType = (normalizedFile?.type || aiFile?.type || "")
-        .split("/")[1]
-        ?.trim();
-      const ext = (extFromName || extFromType || "jpg").toLowerCase();
-
-      const fileName = `${uuidv4()}.${ext}`;
-      const filePath = `${user.id}/${fileName}`;
-
-      debugLog("Selected file", {
-        name: safeName,
-        type: normalizedFile?.type || aiFile?.type,
-        size: normalizedFile?.size || aiFile?.size,
-      });
-
-      // 0 byte engeli (extra güvenlik)
-      if (!normalizedFile?.size || normalizedFile.size === 0) {
+      // Guard: never allow 0 byte to upload
+      if (!aiFile?.size || aiFile.size === 0) {
         toast({
           variant: "destructive",
           title: "Foto okunamadı",
@@ -560,17 +506,27 @@ export const MealTracker = ({ addMeal }) => {
         return;
       }
 
+      const safeName = aiFile?.name || "";
+      const extFromName = safeName.includes(".") ? safeName.split(".").pop() : null;
+      const extFromType = (aiFile?.type || "").split("/")[1]?.trim();
+      const ext = (extFromName || extFromType || "jpg").toLowerCase();
+
+      const fileName = `${uuidv4()}.${ext}`;
+      const filePath = `${user.id}/${fileName}`;
+
+      debugLog("Selected file", { name: safeName, type: aiFile?.type, size: aiFile?.size });
+
       debugLog("Uploading to storage", {
         bucket: FOOD_BUCKET,
         filePath,
         ext,
-        contentType: normalizedFile?.type || aiFile?.type || "image/jpeg",
+        contentType: aiFile?.type || "image/jpeg",
       });
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from(FOOD_BUCKET)
-        .upload(filePath, normalizedFile, {
-          contentType: normalizedFile?.type || aiFile?.type || "image/jpeg",
+        .upload(filePath, aiFile, {
+          contentType: aiFile?.type || "image/jpeg",
           upsert: false,
           cacheControl: "3600",
         });
@@ -583,12 +539,10 @@ export const MealTracker = ({ addMeal }) => {
 
       if (uploadError) throw uploadError;
 
-      // 3) public URL
       const { data: publicData } = supabase.storage.from(FOOD_BUCKET).getPublicUrl(filePath);
       const imageUrl = publicData?.publicUrl;
       if (!imageUrl) throw new Error("PUBLIC_URL_FAIL");
 
-      // 4) session token
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -596,7 +550,6 @@ export const MealTracker = ({ addMeal }) => {
       debugLog("Session check", { hasSession: !!session, hasToken: !!session?.access_token });
       if (!session?.access_token) throw new Error("NO_SESSION");
 
-      // 5) invoke function
       debugLog("Invoking function", { fn: "analyze-food-image", imageUrlLen: imageUrl.length });
 
       const { data, error } = await supabase.functions.invoke("analyze-food-image", {
@@ -613,8 +566,6 @@ export const MealTracker = ({ addMeal }) => {
       if (error) throw error;
 
       setAnalysisResult(data);
-
-      // 6) increment usage
       await incrementAiUsage(supabase, user.id);
     } catch (err) {
       debugLog("Analyze error (catch)", {
@@ -666,9 +617,9 @@ export const MealTracker = ({ addMeal }) => {
     });
   };
 
-  // =====================================================
-  //                        UI helpers
-  // =====================================================
+  // -----------------------------
+  // UI helpers (unchanged)
+  // -----------------------------
   const FoodIcon = ({ category }) => {
     const p = { className: "w-6 h-6 text-emerald-600" };
     if (category === "kahvalti") return <Coffee {...p} />;
@@ -818,19 +769,8 @@ export const MealTracker = ({ addMeal }) => {
                 </Button>
               </div>
 
-              {/* Native picker butonu (Android WebView bridge varsa) */}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  const ok = openNativePickerIfExists();
-                  if (!ok) {
-                    // native yoksa normal file picker (desktop / normal browser)
-                    document.getElementById("upload-ai")?.click();
-                  }
-                }}
-                className="w-full"
-              >
+              {/* Galeriden Foto Seç */}
+              <Button type="button" variant="outline" onClick={pickPhoto} className="w-full">
                 <ImageIcon className="mr-2 h-4 w-4" />
                 Galeriden Foto Seç
               </Button>
@@ -838,13 +778,11 @@ export const MealTracker = ({ addMeal }) => {
               {/* Fotoğraf yükleme alanı */}
               {!aiFile && (
                 <Label
-                  // ✅ FIX: Native varsa input'u tetikleme (mobilde phantom 0-byte problemi)
-                  htmlFor={isNativeAvailable ? undefined : "upload-ai"}
+                  // UI aynı, sadece click davranışı pickPhoto
+                  htmlFor={undefined}
                   onClick={(e) => {
-                    if (isNativeAvailable) {
-                      e.preventDefault();
-                      openNativePickerIfExists();
-                    }
+                    e.preventDefault();
+                    pickPhoto();
                   }}
                   className="cursor-pointer flex flex-col items-center justify-center p-8 border-2 border-emerald-300 border-dashed rounded-lg hover:bg-emerald-50"
                 >
@@ -859,17 +797,7 @@ export const MealTracker = ({ addMeal }) => {
                   <p className="font-medium text-gray-800 text-sm">{aiFile.name}</p>
 
                   <div className="flex gap-3">
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        // ✅ FIX: Native varsa input click kullanma
-                        if (isNativeAvailable) {
-                          openNativePickerIfExists();
-                          return;
-                        }
-                        fileInputRef.current?.click();
-                      }}
-                    >
+                    <Button variant="outline" onClick={pickPhoto}>
                       Değiştir
                     </Button>
 
