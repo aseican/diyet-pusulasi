@@ -52,15 +52,12 @@ function localYMD(d = new Date()) {
   return local.toISOString().slice(0, 10);
 }
 
-
 function monthYM() {
   return new Date().toISOString().slice(0, 7);
 }
 
 function normalizeTier(tierRaw) {
   const t = (tierRaw || "free").toString().trim().toLowerCase();
-  // Türkçe karakter/boşluk varyasyonlarını normalize et
-  // kapsamlı / kapsamli / Kapsamlı gibi
   const noSpaces = t.replace(/\s+/g, "");
   const trFixed = noSpaces
     .replace(/ı/g, "i")
@@ -201,27 +198,25 @@ export function MealTracker({ addMeal }) {
   const { user } = useAuth();
 
   // -------- Tabs (controlled + persist) --------
- const PERSIST_MEALTRACKER_TAB = false; // ✅ bunu false bırak: app açılışını asla etkilemesin
+  const PERSIST_MEALTRACKER_TAB = false; // ✅ bunu false bırak: app açılışını asla etkilemesin
+  const TAB_KEY = "dp_mealtracker_tab_v1";
 
-const TAB_KEY = "dp_mealtracker_tab_v1";
+  const [tab, setTab] = useState(() => {
+    if (!PERSIST_MEALTRACKER_TAB) return "manual";
+    try {
+      return localStorage.getItem(TAB_KEY) || "manual";
+    } catch {
+      return "manual";
+    }
+  });
 
-const [tab, setTab] = useState(() => {
-  if (!PERSIST_MEALTRACKER_TAB) return "manual";
-  try {
-    return localStorage.getItem(TAB_KEY) || "manual";
-  } catch {
-    return "manual";
-  }
-});
-
-const setTabPersist = (v) => {
-  setTab(v);
-  if (!PERSIST_MEALTRACKER_TAB) return;
-  try {
-    localStorage.setItem(TAB_KEY, v);
-  } catch {}
-};
-
+  const setTabPersist = (v) => {
+    setTab(v);
+    if (!PERSIST_MEALTRACKER_TAB) return;
+    try {
+      localStorage.setItem(TAB_KEY, v);
+    } catch {}
+  };
 
   // -------- Profile / Quota (live) --------
   const [profileTier, setProfileTier] = useState("free");
@@ -262,6 +257,67 @@ const setTabPersist = (v) => {
   const [unit, setUnit] = useState("gram");
   const [mealType, setMealType] = useState("Kahvaltı");
 
+  // AI fallback button state
+  const [addingFromAI, setAddingFromAI] = useState(false);
+
+  const getDeviceId = useCallback(() => {
+    const k = "device_id";
+    let v = localStorage.getItem(k);
+    if (!v) {
+      v = uuidv4();
+      localStorage.setItem(k, v);
+    }
+    return v;
+  }, []);
+
+  const handleAddFromAI = useCallback(async () => {
+    const q = searchTerm.trim();
+    if (q.length < 2 || addingFromAI) return;
+
+    setAddingFromAI(true);
+    try {
+      const device_id = getDeviceId();
+
+      const { data: sessionWrap } = await supabase.auth.getSession();
+      const token = sessionWrap?.session?.access_token;
+
+      const { data, error } = await supabase.functions.invoke("ai-food", {
+        body: { query: q, device_id },
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const f = data?.food;
+      if (!f?.id) throw new Error("AI_RESULT_EMPTY");
+
+      const mapped = {
+        id: f.id,
+        name_tr: f.name ?? q,
+        calories: safeNumber(f.calories, 0),
+        protein: safeNumber(f.protein, 0),
+        carbs: safeNumber(f.carbs, 0),
+        fat: safeNumber(f.fat, 0),
+        unit_gram: 100,
+        portion_gram: 200,
+        category: "ana_yemek",
+      };
+
+      setSelectedFood(mapped);
+      setQuantity(100);
+      setUnit("gram");
+
+      toast({ title: "AI ile eklendi", description: mapped.name_tr });
+    } catch (e) {
+      const msg = e?.message || "AI ekleme başarısız";
+      toast({ variant: "destructive", title: "AI Hatası", description: msg });
+    } finally {
+      setAddingFromAI(false);
+    }
+  }, [searchTerm, addingFromAI, getDeviceId, toast]);
+
+  // ✅ Manuel arama: RPC search_manual_foods
   const searchFoods = useCallback(async () => {
     const q = searchTerm.trim();
     if (q.length < 2) {
@@ -270,11 +326,8 @@ const setTabPersist = (v) => {
     }
 
     setLoadingSearch(true);
-    const { data, error } = await supabase
-      .from("foods")
-      .select("id, name_tr, calories, protein, carbs, fat, unit_gram, portion_gram, category")
-      .ilike("name_tr", `%${q}%`)
-      .limit(50);
+
+    const { data, error } = await supabase.rpc("search_manual_foods", { q, lim: 50 });
 
     if (error) {
       toast({
@@ -284,7 +337,19 @@ const setTabPersist = (v) => {
       });
       setSearchResults([]);
     } else {
-      setSearchResults(data || []);
+      // manual_foods -> UI beklentisine map
+      const mapped = (data || []).map((f) => ({
+        id: f.id,
+        name_tr: f.name, // UI aynı kalsın
+        calories: safeNumber(f.calories, 0),
+        protein: safeNumber(f.protein, 0),
+        carbs: safeNumber(f.carbs, 0),
+        fat: safeNumber(f.fat, 0),
+        unit_gram: 100,
+        portion_gram: 200,
+        category: "ana_yemek",
+      }));
+      setSearchResults(mapped);
     }
 
     setLoadingSearch(false);
@@ -409,16 +474,12 @@ const setTabPersist = (v) => {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // ✅ Tek giriş noktası: “Yemek Fotoğrafı Yükle”
-  // Native varsa native açar, yoksa input açar
   const openPhotoPicker = () => {
     if (nativeAvailable) {
       try {
         window.NativeImage.pickImageFromGallery();
         return;
-      } catch {
-        // native patlarsa web input fallback
-      }
+      } catch {}
     }
     fileInputRef.current?.click();
   };
@@ -436,7 +497,6 @@ const setTabPersist = (v) => {
     });
     setAnalysisResult(null);
 
-    // ✅ Dosya seçilince AI tabında kal
     setTabPersist("ai");
   };
 
@@ -462,11 +522,9 @@ const setTabPersist = (v) => {
   const handleAnalyze = async () => {
     if (!aiBlob || !aiMeta || !user?.id || isAnalyzing) return;
 
-    // quota kontrol + profile normalize
     try {
       const quota = await checkAndUpdateQuota(user.id);
 
-      // UI state’ini canlı profile ile senkronla
       const tier = normalizeTier(quota.profile?.plan_tier);
       const lim = PLAN_LIMITS[tier] || PLAN_LIMITS.free;
       setProfileTier(tier);
@@ -505,13 +563,9 @@ const setTabPersist = (v) => {
 
       setAnalysisResult(data);
 
-      // ✅ Kullanımı DB’de artır + UI’da anında güncelle
-      const updated = await incrementAiUsage(user.id);
-      setDailyUsed((p) => p + 1); // anında düşsün
+      await incrementAiUsage(user.id);
+      setDailyUsed((p) => p + 1);
       setMonthlyUsed((p) => p + 1);
-
-      // Sonra sync istersek:
-      // await refreshProfile();
     } catch {
       toast({ variant: "destructive", title: "Analiz Hatası", description: "Analiz yapılamadı." });
     } finally {
@@ -625,7 +679,27 @@ const setTabPersist = (v) => {
           </div>
 
           {!loadingSearch && searchResults.length === 0 && searchTerm.trim().length >= 2 && (
-            <p className="text-center text-sm text-gray-500">Sonuç bulunamadı.</p>
+            <div className="space-y-2">
+              <p className="text-center text-sm text-gray-500">Sonuç bulunamadı.</p>
+
+              <Button
+                onClick={handleAddFromAI}
+                disabled={addingFromAI}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60"
+              >
+                {addingFromAI ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Ekleniyor...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="mr-2 h-4 w-4" />
+                    AI ile ekle (ücretsiz)
+                  </>
+                )}
+              </Button>
+            </div>
           )}
         </TabsContent>
 
@@ -666,7 +740,6 @@ const setTabPersist = (v) => {
             </div>
           ) : (
             <div className="space-y-3">
-              {/* Upload Card (single entry point) */}
               {!aiBlob ? (
                 <button
                   type="button"
@@ -675,9 +748,7 @@ const setTabPersist = (v) => {
                 >
                   <Camera className="h-8 w-8 text-emerald-500" />
                   <p className="mt-2 font-medium text-emerald-700">Yemek Fotoğrafı Yükle</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {nativeAvailable ? "Galeriden seç" : "Dosya seç"}
-                  </p>
+                  <p className="text-xs text-gray-500 mt-1">{nativeAvailable ? "Galeriden seç" : "Dosya seç"}</p>
                 </button>
               ) : (
                 <div className="p-4 border rounded-lg bg-gray-50 space-y-3">
@@ -690,7 +761,12 @@ const setTabPersist = (v) => {
                       <Button type="button" variant="outline" onClick={openPhotoPicker}>
                         <RefreshCw className="h-4 w-4 mr-1" /> Değiştir
                       </Button>
-                      <Button type="button" variant="outline" onClick={removePhoto} className="border-red-500 text-red-600 hover:bg-red-50">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={removePhoto}
+                        className="border-red-500 text-red-600 hover:bg-red-50"
+                      >
                         <X className="h-4 w-4 mr-1" /> Kaldır
                       </Button>
                     </div>
