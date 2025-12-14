@@ -1,35 +1,41 @@
-import React, { useRef } from 'react';
-import { Helmet } from 'react-helmet';
-import { useAuth } from '@/contexts/SupabaseAuthContext';
-import { supabase } from '@/lib/customSupabaseClient';
-import { useToast } from '@/components/ui/use-toast';
-import { calculateCalorieTarget } from '@/lib/calculator';
-import { handlePurchase } from '@/lib/BillingIntegration';
+import React, { useRef } from "react";
+import { Helmet } from "react-helmet";
+import { useAuth } from "@/contexts/SupabaseAuthContext";
+import { supabase } from "@/lib/customSupabaseClient";
+import { useToast } from "@/components/ui/use-toast";
+import { calculateCalorieTarget } from "@/lib/calculator";
+import { handlePurchase } from "@/lib/BillingIntegration";
 
-import Header from '@/components/Header';
-import BottomNav from '@/components/BottomNav';
-import { Dashboard } from '@/components/Dashboard';
-import { MealTracker } from '@/components/MealTracker';
-import { Progress } from '@/components/Progress';
-import Profile from '@/components/Profile';
-import Onboarding from '@/components/Onboarding';
-import AuthScreen from '@/components/AuthScreen';
-import { PremiumUyelik } from '@/components/PremiumUyelik';
+import Header from "@/components/Header";
+import BottomNav from "@/components/BottomNav";
+import { Dashboard } from "@/components/Dashboard";
+import { MealTracker } from "@/components/MealTracker";
+import { Progress } from "@/components/Progress";
+import Profile from "@/components/Profile";
+import Onboarding from "@/components/Onboarding";
+import AuthScreen from "@/components/AuthScreen";
+import { PremiumUyelik } from "@/components/PremiumUyelik";
 
 /**
  * ✅ Native image callback - GLOBAL BUFFER
  * Android her zaman: window.__nativeImagePickResult && window.__nativeImagePickResult(b64, mime)
  * çağırıyor. Component unmount olsa bile kaybolmaması için burada bufferlıyoruz.
  */
-if (typeof window !== 'undefined') {
+if (typeof window !== "undefined") {
   if (!window.__nativeImagePickResult) {
     window.__nativeImagePickResult = (b64, mime) => {
       window.__nativeImagePickBuffer = { b64, mime, ts: Date.now() };
-      // Debug
       // eslint-disable-next-line no-console
-      console.log('[NATIVE] buffered image', { hasB64: !!b64, mime, len: b64?.length || 0 });
+      console.log("[NATIVE] buffered image", { hasB64: !!b64, mime, len: b64?.length || 0 });
     };
   }
+}
+
+// ✅ UTC kaymasını engelleyen local date (YYYY-MM-DD)
+function localYMD(d = new Date()) {
+  const tzOffsetMs = d.getTimezoneOffset() * 60 * 1000;
+  const local = new Date(d.getTime() - tzOffsetMs);
+  return local.toISOString().slice(0, 10);
 }
 
 export function App() {
@@ -39,21 +45,33 @@ export function App() {
   // ✅ activeTab'i persist et: picker’dan dönünce resetlenmesin
   const [activeTab, setActiveTab] = React.useState(() => {
     try {
-      return localStorage.getItem('activeTab') || 'dashboard';
+      return localStorage.getItem("activeTab") || "dashboard";
     } catch {
-      return 'dashboard';
+      return "dashboard";
     }
   });
 
   React.useEffect(() => {
     try {
-      localStorage.setItem('activeTab', activeTab);
+      localStorage.setItem("activeTab", activeTab);
     } catch {}
   }, [activeTab]);
 
   const [userData, setUserData] = React.useState(null);
   const [meals, setMeals] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+
+  // ✅ Günlük gösterim için seçili gün (şimdilik sadece "bugün")
+  const [selectedDate, setSelectedDate] = React.useState(localYMD());
+
+  // ✅ Gün değişince otomatik bugüne geçsin (app açık kalsa bile)
+  React.useEffect(() => {
+    const id = setInterval(() => {
+      const now = localYMD();
+      setSelectedDate((prev) => (prev === now ? prev : now));
+    }, 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // WebView komponentine erişmek için (sende gerçek RN yoksa bile zarar vermez)
   const webViewRef = useRef(null);
@@ -69,44 +87,49 @@ export function App() {
     if (!user) return;
 
     const { data, error } = await supabase
-      .from('profiles')
+      .from("profiles")
       .select(
-        'id,username,target_calories,created_at,gender,age,height,weight,target_weight,goal_type,activity_level,start_weight,water_intake,daily_water_goal,last_reset_date,plan_tier,ai_usage_count,premium_expires_at'
+        "id,username,target_calories,created_at,gender,age,height,weight,target_weight,goal_type,activity_level,start_weight,water_intake,daily_water_goal,last_reset_date,plan_tier,ai_usage_count,premium_expires_at"
       )
-      .eq('id', user.id)
+      .eq("id", user.id)
       .maybeSingle();
 
     if (error) {
-      console.error('Profil yükleme hatası:', error);
+      console.error("Profil yükleme hatası:", error);
       toast({
-        variant: 'destructive',
-        title: 'Profil Hatası',
-        description: 'Profiliniz yüklenirken bir hata oluştu.',
+        variant: "destructive",
+        title: "Profil Hatası",
+        description: "Profiliniz yüklenirken bir hata oluştu.",
       });
     } else {
       setUserData(data);
     }
   }, [user, toast]);
 
+  // ✅ SADECE BUGÜNÜN ÖĞÜNLERİNİ ÇEK
   const fetchMeals = React.useCallback(async () => {
     if (!user) return;
+
+    const day = selectedDate || localYMD();
+
     const { data, error } = await supabase
-      .from('added_meals')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
+      .from("added_meals")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("date", day) // ✅ kritik
+      .order("created_at", { ascending: false });
 
     if (error) {
-      console.error('Öğün ekleme hatası:', error);
+      console.error("Öğün yükleme hatası:", error);
       toast({
-        variant: 'destructive',
-        title: 'Öğün Hatası',
-        description: 'Öğünler yüklenirken bir hata oluştu.',
+        variant: "destructive",
+        title: "Öğün Hatası",
+        description: "Öğünler yüklenirken bir hata oluştu.",
       });
     } else {
-      setMeals(data);
+      setMeals(data || []);
     }
-  }, [user, toast]);
+  }, [user, toast, selectedDate]);
 
   const updateUserData = React.useCallback(
     async (newData) => {
@@ -118,22 +141,22 @@ export function App() {
       const payload = { ...newData, target_calories: newTargetCalories };
 
       const { data, error } = await supabase
-        .from('profiles')
+        .from("profiles")
         .update(payload)
-        .eq('id', user.id)
+        .eq("id", user.id)
         .select()
         .single();
 
       if (error) {
-        console.error('Profil güncelleme hatası:', error);
+        console.error("Profil güncelleme hatası:", error);
         toast({
-          variant: 'destructive',
-          title: 'Güncelleme Hatası',
-          description: 'Profiliniz güncellenirken bir hata oluştu.',
+          variant: "destructive",
+          title: "Güncelleme Hatası",
+          description: "Profiliniz güncellenirken bir hata oluştu.",
         });
       } else {
         setUserData(data);
-        toast({ title: 'Başarılı!', description: 'Bilgileriniz güncellendi.' });
+        toast({ title: "Başarılı!", description: "Bilgileriniz güncellendi." });
       }
     },
     [user, toast, userData]
@@ -147,40 +170,42 @@ export function App() {
 
     const payload = { ...formData, id: user.id, target_calories, start_weight };
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .insert([payload])
-      .select()
-      .single();
+    const { data, error } = await supabase.from("profiles").insert([payload]).select().single();
 
     if (error) {
-      console.error('Profil kayıt hatası:', error);
+      console.error("Profil kayıt hatası:", error);
       toast({
-        variant: 'destructive',
-        title: 'Kayıt Hatası',
-        description:
-          'Bilgiler kaydedilirken bir hata oluştu. RLS politikasını kontrol edin.',
+        variant: "destructive",
+        title: "Kayıt Hatası",
+        description: "Bilgiler kaydedilirken bir hata oluştu. RLS politikasını kontrol edin.",
       });
     } else {
       setUserData(data);
       toast({
-        title: 'Hoş Geldin!',
-        description: 'Profilin başarıyla oluşturuldu 💚',
+        title: "Hoş Geldin!",
+        description: "Profilin başarıyla oluşturuldu 💚",
       });
     }
   };
 
+  // ✅ INSERT'te date'i garanti et
   const addMeal = async (mealData) => {
     if (!user) return;
-    const mealWithUser = { ...mealData, user_id: user.id };
-    const { error } = await supabase.from('added_meals').insert([mealWithUser]);
+
+    const mealWithUser = {
+      ...mealData,
+      user_id: user.id,
+      date: localYMD(), // ✅ kritik
+    };
+
+    const { error } = await supabase.from("added_meals").insert([mealWithUser]);
 
     if (error) {
-      console.error('Öğün ekleme hatası:', error);
+      console.error("Öğün ekleme hatası:", error);
       toast({
-        variant: 'destructive',
-        title: 'Hata',
-        description: 'Öğün eklenirken bir sorun oluştu.',
+        variant: "destructive",
+        title: "Hata",
+        description: "Öğün eklenirken bir sorun oluştu.",
       });
     } else {
       fetchMeals();
@@ -189,43 +214,33 @@ export function App() {
 
   const deleteMeal = async (mealId) => {
     if (!user) return;
-    const { error } = await supabase
-      .from('added_meals')
-      .delete()
-      .eq('id', mealId);
+    const { error } = await supabase.from("added_meals").delete().eq("id", mealId);
 
     if (error) {
-      console.error('Öğün silme hatası:', error);
+      console.error("Öğün silme hatası:", error);
       toast({
-        variant: 'destructive',
-        title: 'Hata',
-        description: 'Öğün silinirken bir sorun oluştu.',
+        variant: "destructive",
+        title: "Hata",
+        description: "Öğün silinirken bir sorun oluştu.",
       });
     } else {
       setMeals((prev) => prev.filter((m) => m.id !== mealId));
-      toast({ title: 'Başarılı!', description: 'Öğün başarıyla silindi.' });
+      toast({ title: "Başarılı!", description: "Öğün başarıyla silindi." });
     }
   };
 
-  // 🧠 WebView'dan gelen mesajları işler (SATIN ALMA) — kalsın, zarar vermez
+  // 🧠 WebView'dan gelen mesajları işler (SATIN ALMA) — kalsın
   const onWebViewMessage = React.useCallback(
     async (event) => {
       try {
-        const data = JSON.parse(event?.nativeEvent?.data || '{}');
-
-        if (data.type === 'START_PURCHASE') {
+        const data = JSON.parse(event?.nativeEvent?.data || "{}");
+        if (data.type === "START_PURCHASE") {
           console.log("WebView'dan ödeme isteği alındı:", data.productId);
           const token = await getSupabaseSessionToken();
-          await handlePurchase(
-            data.productId,
-            webViewRef,
-            updateUserData,
-            toast,
-            token
-          );
+          await handlePurchase(data.productId, webViewRef, updateUserData, toast, token);
         }
       } catch (e) {
-        console.error('WebView message parse error:', e);
+        console.error("WebView message parse error:", e);
       }
     },
     [updateUserData, toast, getSupabaseSessionToken]
@@ -271,22 +286,17 @@ export function App() {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'dashboard':
+      case "dashboard":
         return (
-          <Dashboard
-            userData={userData}
-            meals={meals}
-            updateUserData={updateUserData}
-            deleteMeal={deleteMeal}
-          />
+          <Dashboard userData={userData} meals={meals} updateUserData={updateUserData} deleteMeal={deleteMeal} />
         );
-      case 'meals':
+      case "meals":
         return <MealTracker addMeal={addMeal} />;
-      case 'progress':
+      case "progress":
         return <Progress userData={userData} />;
-      case 'profile':
+      case "profile":
         return <Profile userData={userData} updateUserData={updateUserData} />;
-      case 'premium':
+      case "premium":
         return (
           <PremiumUyelik
             onPurchaseClick={() => {
@@ -296,12 +306,7 @@ export function App() {
         );
       default:
         return (
-          <Dashboard
-            userData={userData}
-            meals={meals}
-            updateUserData={updateUserData}
-            deleteMeal={deleteMeal}
-          />
+          <Dashboard userData={userData} meals={meals} updateUserData={updateUserData} deleteMeal={deleteMeal} />
         );
     }
   };
@@ -309,7 +314,7 @@ export function App() {
   return (
     <>
       <Helmet>
-        <title>Kalori & Diyet Takip - {userData?.username || 'Kullanıcı'}</title>
+        <title>Kalori & Diyet Takip - {userData?.username || "Kullanıcı"}</title>
       </Helmet>
       <div className="mobile-container">
         <Header userData={userData} />

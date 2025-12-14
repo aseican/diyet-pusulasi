@@ -46,9 +46,12 @@ function guessExtFromMime(mime) {
   return "jpg";
 }
 
-function todayYMD() {
-  return new Date().toISOString().split("T")[0];
+function localYMD(d = new Date()) {
+  const tzOffsetMs = d.getTimezoneOffset() * 60 * 1000;
+  const local = new Date(d.getTime() - tzOffsetMs);
+  return local.toISOString().slice(0, 10);
 }
+
 
 function monthYM() {
   return new Date().toISOString().slice(0, 7);
@@ -94,7 +97,7 @@ async function checkAndUpdateQuota(userId) {
   const tier = normalizeTier(profile.plan_tier);
   const limits = PLAN_LIMITS[tier] || PLAN_LIMITS.free;
 
-  const today = todayYMD();
+  const today = localYMD();
   const month = monthYM();
 
   let dailyUsed = safeNumber(profile.ai_daily_used, 0);
@@ -121,7 +124,7 @@ async function checkAndUpdateQuota(userId) {
 async function incrementAiUsage(userId) {
   const profile = await fetchProfile(userId);
 
-  const today = todayYMD();
+  const today = localYMD();
   const month = monthYM();
 
   const daily = safeNumber(profile.ai_daily_used, 0) + 1;
@@ -313,7 +316,7 @@ const setTabPersist = (v) => {
       quantity: qty,
       unit,
       user_id: user?.id,
-      date: todayYMD(),
+      date: localYMD(),
     };
 
     addMeal(meal);
@@ -529,7 +532,7 @@ const setTabPersist = (v) => {
       quantity: safeNumber(analysisResult?.quantity, 1),
       unit: analysisResult?.unit || "adet",
       user_id: user.id,
-      date: todayYMD(),
+      date: localYMD(),
     };
 
     addMeal(meal);
