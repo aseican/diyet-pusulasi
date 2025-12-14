@@ -138,33 +138,11 @@ async function incrementAiUsage(supabaseClient, userId) {
 }
 
 // -----------------------------
-// ✅ Mobile-stable image normalize
-// - 0 byte kontrolü
-// - arrayBuffer -> Blob -> File (mobil WebView/Safari bug bypass)
+// Optional: HEIC normalize (istersen sonra ekleriz)
+// Şimdilik direkt file döndürüyoruz (stabil olsun)
 // -----------------------------
 async function normalizeImageFile(file) {
-  if (!file) throw new Error("NO_FILE");
-
-  // 0 byte koruması
-  if (!file.size || file.size === 0) {
-    throw new Error("EMPTY_FILE");
-  }
-
-  // Mobilde bazen File referansı “var ama bozuk” oluyor.
-  // Byte’ları okuyup temiz bir File üretmek en stabil yol.
-  const buffer = await file.arrayBuffer();
-  if (!buffer || buffer.byteLength === 0) {
-    throw new Error("EMPTY_BUFFER");
-  }
-
-  const blob = new Blob([buffer], { type: file.type || "image/jpeg" });
-
-  const safeName = file.name && file.name.trim().length ? file.name : `image_${Date.now()}.jpg`;
-
-  return new File([blob], safeName, {
-    type: blob.type,
-    lastModified: Date.now(),
-  });
+  return file;
 }
 
 export const MealTracker = ({ addMeal }) => {
@@ -207,6 +185,9 @@ export const MealTracker = ({ addMeal }) => {
   // AI FOTOĞRAF STATE
   const fileInputRef = useRef(null);
   const [aiFile, setAiFile] = useState(null);
+
+  // ✅ Native mevcut mu?
+  const isNativeAvailable = !!window?.NativeImage?.pickImageFromGallery;
 
   // Foto seçildiyse her zaman AI tab'da kal
   useEffect(() => {
@@ -272,9 +253,11 @@ export const MealTracker = ({ addMeal }) => {
             }
           })()}`;
 
+    // console
     // eslint-disable-next-line no-console
     console.log(line);
 
+    // on-screen
     setAiDebugLogs((prev) => {
       const next = [...prev, line];
       return next.length > 200 ? next.slice(next.length - 200) : next;
@@ -471,12 +454,20 @@ export const MealTracker = ({ addMeal }) => {
   //                     AI ANALYZE
   // =====================================================
   const handleFileChange = (e) => {
+    // ✅ FIX: Native bridge varken Web input change event'i mobilde phantom/0-byte geliyor.
+    // Bu durumda tamamen ignore ediyoruz.
+    if (isNativeAvailable) {
+      debugLog("Ignoring file input change (native available)");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
     if (e.target.files?.length > 0) {
       const f = e.target.files[0];
 
       debugLog("File picked (input)", { name: f?.name, type: f?.type, size: f?.size });
 
-      // ✅ Mobilde 0 byte gelirse burada yakala
+      // desktop/browser'da da 0 byte gelirse engelle
       if (!f?.size || f.size === 0) {
         toast({
           variant: "destructive",
@@ -541,14 +532,11 @@ export const MealTracker = ({ addMeal }) => {
       // 2) upload
       const normalizedFile = await normalizeImageFile(aiFile);
 
-      // ✅ Normalize sonrası ekstra koruma
-      if (!normalizedFile?.size || normalizedFile.size === 0) {
-        throw new Error("IMAGE_IS_EMPTY_AFTER_NORMALIZE");
-      }
-
       const safeName = normalizedFile?.name || aiFile?.name || "";
       const extFromName = safeName.includes(".") ? safeName.split(".").pop() : null;
-      const extFromType = (normalizedFile?.type || aiFile?.type || "").split("/")[1]?.trim();
+      const extFromType = (normalizedFile?.type || aiFile?.type || "")
+        .split("/")[1]
+        ?.trim();
       const ext = (extFromName || extFromType || "jpg").toLowerCase();
 
       const fileName = `${uuidv4()}.${ext}`;
@@ -559,6 +547,18 @@ export const MealTracker = ({ addMeal }) => {
         type: normalizedFile?.type || aiFile?.type,
         size: normalizedFile?.size || aiFile?.size,
       });
+
+      // 0 byte engeli (extra güvenlik)
+      if (!normalizedFile?.size || normalizedFile.size === 0) {
+        toast({
+          variant: "destructive",
+          title: "Foto okunamadı",
+          description: "Seçilen fotoğraf boş görünüyor (0 byte).",
+        });
+        setShowAiDebug(true);
+        setIsAnalyzing(false);
+        return;
+      }
 
       debugLog("Uploading to storage", {
         bucket: FOOD_BUCKET,
@@ -825,7 +825,7 @@ export const MealTracker = ({ addMeal }) => {
                 onClick={() => {
                   const ok = openNativePickerIfExists();
                   if (!ok) {
-                    // native yoksa normal file picker
+                    // native yoksa normal file picker (desktop / normal browser)
                     document.getElementById("upload-ai")?.click();
                   }
                 }}
@@ -838,7 +838,14 @@ export const MealTracker = ({ addMeal }) => {
               {/* Fotoğraf yükleme alanı */}
               {!aiFile && (
                 <Label
-                  htmlFor="upload-ai"
+                  // ✅ FIX: Native varsa input'u tetikleme (mobilde phantom 0-byte problemi)
+                  htmlFor={isNativeAvailable ? undefined : "upload-ai"}
+                  onClick={(e) => {
+                    if (isNativeAvailable) {
+                      e.preventDefault();
+                      openNativePickerIfExists();
+                    }
+                  }}
                   className="cursor-pointer flex flex-col items-center justify-center p-8 border-2 border-emerald-300 border-dashed rounded-lg hover:bg-emerald-50"
                 >
                   <Camera className="h-8 w-8 text-emerald-500" />
@@ -852,7 +859,17 @@ export const MealTracker = ({ addMeal }) => {
                   <p className="font-medium text-gray-800 text-sm">{aiFile.name}</p>
 
                   <div className="flex gap-3">
-                    <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        // ✅ FIX: Native varsa input click kullanma
+                        if (isNativeAvailable) {
+                          openNativePickerIfExists();
+                          return;
+                        }
+                        fileInputRef.current?.click();
+                      }}
+                    >
                       Değiştir
                     </Button>
 
