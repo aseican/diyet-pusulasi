@@ -1,18 +1,40 @@
-import React, { useEffect, useMemo, useState } from "react";
+// ======================================================================
+//                    MealTracker.jsx (PROD / NO DEBUG UI)
+//      - Manuel arama + öğün ekleme (bozulmaz)
+//      - AI foto analiz (Web + Android NativeImage) + kota kontrol
+//      - Mobil uyumlu: base64 -> Blob -> Supabase upload
+//      - Debug ekranları / log butonları kaldırıldı
+// ======================================================================
+
+import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { supabase } from "@/lib/customSupabaseClient";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
-import { supabase } from "@/lib/customSupabaseClient";
-import { Loader2, Image as ImageIcon, Upload, Plus } from "lucide-react";
+import { Search, Plus, Utensils, Drumstick, Apple, Coffee, Loader2, Zap, Camera, Image as ImageIcon } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Label } from "@/components/ui/label";
+import { useAuth } from "@/contexts/SupabaseAuthContext";
 import { v4 as uuidv4 } from "uuid";
 
 const FOOD_BUCKET = "food-images";
 
-function safeJson(obj) {
-  try {
-    return JSON.stringify(obj, null, 2);
-  } catch {
-    return String(obj);
-  }
+// -----------------------------
+// Helpers
+// -----------------------------
+function safeNumber(x, fallback = 0) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function guessExtFromMime(mime) {
@@ -23,133 +45,244 @@ function guessExtFromMime(mime) {
   return "jpg";
 }
 
-function buildMealFromResult(result) {
-  const nowIso = new Date().toISOString();
-
-  const name =
-    result?.foodName ||
-    result?.name ||
-    result?.title ||
-    result?.meal ||
-    "Analiz Edilen Öğün";
-
-  const calories =
-    result?.calories ??
-    result?.kcal ??
-    result?.energy_kcal ??
-    result?.nutrition?.calories ??
-    null;
-
-  const protein =
-    result?.protein ??
-    result?.protein_g ??
-    result?.nutrition?.protein ??
-    null;
-
-  const carbs =
-    result?.carbs ??
-    result?.carbohydrate ??
-    result?.carbohydrate_g ??
-    result?.nutrition?.carbs ??
-    null;
-
-  const fat = result?.fat ?? result?.fat_g ?? result?.nutrition?.fat ?? null;
-
-  return {
-    id: uuidv4(),
-    created_at: nowIso,
-    name,
-    calories: typeof calories === "number" ? calories : Number(calories) || null,
-    macros: {
-      protein: typeof protein === "number" ? protein : Number(protein) || null,
-      carbs: typeof carbs === "number" ? carbs : Number(carbs) || null,
-      fat: typeof fat === "number" ? fat : Number(fat) || null,
-    },
-    raw: result,
-  };
+function todayYMD() {
+  return new Date().toISOString().split("T")[0];
 }
 
+function monthYM() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+// -----------------------------
+// Kota kontrol (senin kolonlara uyumlu)
+// -----------------------------
+const PLAN_LIMITS = {
+  free: { daily: 3, monthly: 3 },
+  basic: { daily: 10, monthly: 30 },
+  pro: { daily: 20, monthly: 60 },
+  kapsamli: { daily: 99999, monthly: 99999 },
+
+  // Google Play ürün ID’leri
+  sub_premium_monthly: { daily: 30, monthly: 1000 },
+  sub_pro_monthly: { daily: 50, monthly: 2000 },
+  sub_unlimited_monthly: { daily: 99999, monthly: 99999 },
+};
+
+async function checkAndUpdateQuota(userId) {
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .single();
+
+  if (error || !profile) return { allowed: false, reason: "USER_NOT_FOUND" };
+
+  const limits = PLAN_LIMITS[profile.plan_tier] || PLAN_LIMITS.free;
+
+  const today = todayYMD();
+  const month = monthYM();
+
+  let dailyUsed = safeNumber(profile.ai_daily_used, 0);
+  let monthlyUsed = safeNumber(profile.ai_monthly_used, 0);
+
+  // günlük reset
+  if (profile.ai_last_use_date !== today) {
+    dailyUsed = 0;
+    await supabase
+      .from("profiles")
+      .update({ ai_daily_used: 0, ai_last_use_date: today })
+      .eq("id", userId);
+  }
+
+  // aylık reset
+  if (profile.ai_last_use_month !== month) {
+    monthlyUsed = 0;
+    await supabase
+      .from("profiles")
+      .update({ ai_monthly_used: 0, ai_last_use_month: month })
+      .eq("id", userId);
+  }
+
+  if (dailyUsed >= limits.daily) return { allowed: false, reason: "DAILY_LIMIT_REACHED", limits, dailyUsed, monthlyUsed };
+  if (monthlyUsed >= limits.monthly) return { allowed: false, reason: "MONTHLY_LIMIT_REACHED", limits, dailyUsed, monthlyUsed };
+
+  return { allowed: true, limits, dailyUsed, monthlyUsed, profile };
+}
+
+async function incrementAiUsage(userId) {
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("ai_daily_used, ai_monthly_used")
+    .eq("id", userId)
+    .single();
+
+  if (!profile) return;
+
+  const today = todayYMD();
+  const month = monthYM();
+
+  const daily = safeNumber(profile.ai_daily_used, 0) + 1;
+  const monthly = safeNumber(profile.ai_monthly_used, 0) + 1;
+
+  await supabase
+    .from("profiles")
+    .update({
+      ai_daily_used: daily,
+      ai_monthly_used: monthly,
+      ai_last_use_date: today,
+      ai_last_use_month: month,
+    })
+    .eq("id", userId);
+}
+
+// -----------------------------
+// HEIC normalize (web için) - native zaten jpeg yolluyor
+// -----------------------------
+async function normalizeImageFileIfNeeded(file) {
+  if (!file) return file;
+
+  const name = file?.name || "";
+  const type = (file?.type || "").toLowerCase();
+  const isHeic =
+    type.includes("image/heic") ||
+    type.includes("image/heif") ||
+    /\.heic$/i.test(name) ||
+    /\.heif$/i.test(name);
+
+  if (!isHeic) return file;
+
+  try {
+    const mod = await import("heic2any");
+    const heic2any = mod?.default || mod;
+
+    const convertedBlob = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.92 });
+    const jpegBlob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
+
+    const jpegName = name && name.includes(".") ? name.replace(/\.(heic|heif)$/i, ".jpg") : `photo_${Date.now()}.jpg`;
+    return new File([jpegBlob], jpegName, { type: "image/jpeg" });
+  } catch {
+    // dönüştüremezsek aynen devam (upload yine denenir)
+    return file;
+  }
+}
+
+// -----------------------------
+// Manuel hesap
+// -----------------------------
+function getMultiplier(unit, quantity, food) {
+  // food değerleri 100g bazlı
+  let totalGram = 0;
+
+  switch (unit) {
+    case "gram":
+      totalGram = quantity;
+      break;
+    case "adet":
+      totalGram = quantity * (food.unit_gram || 100);
+      break;
+    case "porsiyon":
+      totalGram = quantity * (food.portion_gram || 200);
+      break;
+    case "bardak":
+      totalGram = quantity * 200;
+      break;
+    case "kasik":
+      totalGram = quantity * 15;
+      break;
+    default:
+      totalGram = quantity;
+  }
+
+  return totalGram / 100;
+}
+
+// ======================================================================
+//                            COMPONENT
+// ======================================================================
 export function MealTracker({ addMeal }) {
   const { toast } = useToast();
+  const { user, userData } = useAuth();
 
-  // ✅ File yerine Blob kullanıyoruz (Android WebView uyumluluğu)
-  const [imageBlob, setImageBlob] = useState(null);
-  const [imageMeta, setImageMeta] = useState(null); // {name,type,size}
-  const [previewUrl, setPreviewUrl] = useState("");
-
-  const [isUploading, setIsUploading] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [result, setResult] = useState(null);
-  const [logs, setLogs] = useState([]);
-
-  const nativeAvailable = useMemo(
-    () => !!window?.NativeImage?.pickImageFromGallery,
+  // --- Plan UI (gösterim amaçlı) ---
+  const planLimitsForUi = useMemo(
+    () => ({
+      free: { daily: 3 },
+      basic: { daily: 10 },
+      pro: { daily: 20 },
+      kapsamli: { daily: 99999 },
+      Kapsamlı: { daily: 99999 },
+      sub_premium_monthly: { daily: 30 },
+      sub_pro_monthly: { daily: 50 },
+      sub_unlimited_monthly: { daily: 99999 },
+    }),
     []
   );
 
-  const log = (msg, data) => {
-    const line = `[${new Date().toISOString()}] ${msg}${
-      data ? ` ${safeJson(data)}` : ""
-    }`;
-    // eslint-disable-next-line no-console
-    console.log(line);
-    setLogs((p) => [...p, line].slice(-250));
-  };
+  const currentPlan = userData?.plan_tier || "free";
+  const quotaLimit = planLimitsForUi[currentPlan]?.daily ?? planLimitsForUi.free.daily;
+  const currentQuota = safeNumber(userData?.ai_daily_used ?? userData?.ai_daily_used, safeNumber(userData?.ai_daily_used, 0));
+  const isQuotaReached = currentQuota >= quotaLimit;
 
-  // Preview URL
+  // --- Manuel state ---
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const [selectedFood, setSelectedFood] = useState(null);
+  const [quantity, setQuantity] = useState(100);
+  const [unit, setUnit] = useState("gram");
+  const [mealType, setMealType] = useState("Kahvaltı");
+
+  // --- AI state (Blob tabanlı) ---
+  const fileInputRef = useRef(null);
+  const [aiBlob, setAiBlob] = useState(null); // Blob | File
+  const [aiMeta, setAiMeta] = useState(null); // {name,type,size}
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState(null);
+
+  const nativeAvailable = useMemo(() => !!window?.NativeImage?.pickImageFromGallery, []);
+
+  // Preview (küçük gösterim için)
   useEffect(() => {
-    if (!imageBlob) {
+    if (!aiBlob) {
       setPreviewUrl("");
       return;
     }
-    const url = URL.createObjectURL(imageBlob);
+    const url = URL.createObjectURL(aiBlob);
     setPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
-  }, [imageBlob]);
+  }, [aiBlob]);
 
-  // ✅ Native callback + error capture
+  // Native bridge yakalama (Android)
   useEffect(() => {
     const receive = async (b64, mime) => {
       try {
-        log("Native received", { hasB64: !!b64, mime, len: b64?.length || 0 });
-
         if (!b64) {
           toast({ title: "Foto seçilmedi" });
           return;
         }
-
         const safeMime = mime || "image/jpeg";
         const res = await fetch(`data:${safeMime};base64,${b64}`);
         const blob = await res.blob();
-
         if (!blob || !blob.size) {
-          toast({ variant: "destructive", title: "Foto okunamadı (0 byte)" });
+          toast({ variant: "destructive", title: "Foto okunamadı" });
           return;
         }
-
         const ext = guessExtFromMime(safeMime);
         const name = `native_${Date.now()}.${ext}`;
 
-        setImageBlob(blob);
-        setImageMeta({ name, type: safeMime, size: blob.size });
-        setResult(null);
+        setAiBlob(blob);
+        setAiMeta({ name, type: safeMime, size: blob.size });
+        setAnalysisResult(null);
 
         toast({ title: "Foto seçildi", description: name });
-        log("Blob ready", { size: blob.size, type: safeMime, name });
-      } catch (e) {
-        log("Native decode failed", { message: e?.message });
+      } catch {
         toast({ variant: "destructive", title: "Foto işlenemedi" });
       }
     };
 
-    window.onerror = (msg, src, line, col, err) => {
-      log("window.onerror", { msg, src, line, col, err: err?.message });
-    };
-    window.onunhandledrejection = (ev) => {
-      log("unhandledrejection", { reason: String(ev?.reason) });
-    };
-
-    // callback alias’ları
+    // alias’lar
     const aliases = [
       "__nativeImagePickResult",
       "nativeImagePickResult",
@@ -165,236 +298,518 @@ export function MealTracker({ addMeal }) {
     window.NativeImage.onImagePicked = receive;
     window.NativeImage.onResult = receive;
 
-    // postMessage support (opsiyonel)
-    const onMessage = (ev) => {
-      try {
-        const data = typeof ev.data === "string" ? JSON.parse(ev.data) : ev.data;
-        if (data?.b64) receive(data.b64, data.mime);
-      } catch {}
-    };
-    window.addEventListener("message", onMessage);
-
-    // buffer yakala
+    // buffer varsa yakala
     if (window.__nativeImagePickBuffer?.b64) {
       const { b64, mime } = window.__nativeImagePickBuffer;
       window.__nativeImagePickBuffer = null;
       receive(b64, mime);
     }
-
-    log("Native hooks installed", {
-      hasNativeBridge: !!window?.NativeImage?.pickImageFromGallery,
-      fileCtor: typeof window.File,
-    });
-
-    return () => window.removeEventListener("message", onMessage);
   }, [toast]);
 
-  const onWebPick = (e) => {
+  // -----------------------------
+  // Manuel arama
+  // -----------------------------
+  const searchFoods = useCallback(async () => {
+    const q = searchTerm.trim();
+    if (q.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("foods")
+      .select("id, name_tr, calories, protein, carbs, fat, unit_gram, portion_gram, category")
+      .ilike("name_tr", `%${q}%`)
+      .limit(50);
+
+    if (error) {
+      // PROD: kullanıcıya göster, console'a basma zorunlu değil ama yararlı
+      // eslint-disable-next-line no-console
+      console.error(error);
+      toast({
+        variant: "destructive",
+        title: "Arama Hatası",
+        description: "Yiyecekler aranırken bir hata oluştu.",
+      });
+      setSearchResults([]);
+    } else {
+      setSearchResults(data || []);
+    }
+
+    setLoading(false);
+  }, [searchTerm, toast]);
+
+  useEffect(() => {
+    const t = setTimeout(searchFoods, 300);
+    return () => clearTimeout(t);
+  }, [searchTerm, searchFoods]);
+
+  // -----------------------------
+  // Manuel öğün ekleme (DÜZELTİLDİ)
+  // -----------------------------
+  const handleAddMealManual = () => {
+    if (!selectedFood) return;
+
+    const qty = safeNumber(quantity, 0);
+    if (!qty || qty <= 0) {
+      toast({ variant: "destructive", title: "Eksik Bilgi", description: "Lütfen miktarı giriniz." });
+      return;
+    }
+
+    const multiplier = getMultiplier(unit, qty, selectedFood);
+
+    const meal = {
+      meal_type: mealType,
+      food_name: selectedFood.name_tr,
+      calories: safeNumber(selectedFood.calories) * multiplier,
+      protein: safeNumber(selectedFood.protein) * multiplier,
+      carbs: safeNumber(selectedFood.carbs) * multiplier,
+      fat: safeNumber(selectedFood.fat) * multiplier,
+      quantity: qty,
+      unit,
+      user_id: user?.id,
+      date: todayYMD(),
+    };
+
+    addMeal(meal);
+
+    setSelectedFood(null);
+    setSearchTerm("");
+    setSearchResults([]);
+
+    toast({ title: "Öğün Eklendi", description: `${meal.food_name} başarıyla eklendi.` });
+  };
+
+  // -----------------------------
+  // AI seçme (Web)
+  // -----------------------------
+  const handleFileChange = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
 
-    // Web’de File var, ama biz yine Blob gibi kullanacağız
-    setImageBlob(f);
-    setImageMeta({ name: f.name, type: f.type || "image/jpeg", size: f.size });
-    setResult(null);
+    const normalized = await normalizeImageFileIfNeeded(f);
 
-    log("Web picked", { name: f.name, size: f.size, type: f.type });
+    setAiBlob(normalized);
+    setAiMeta({
+      name: normalized.name || `photo_${Date.now()}.jpg`,
+      type: normalized.type || "image/jpeg",
+      size: normalized.size || 0,
+    });
+    setAnalysisResult(null);
+  };
+
+  const removePhoto = () => {
+    setAiBlob(null);
+    setAiMeta(null);
+    setAnalysisResult(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const pickFromNative = () => {
     if (!window?.NativeImage?.pickImageFromGallery) {
-      toast({
-        variant: "destructive",
-        title: "Native bridge yok",
-        description: "NativeImage.pickImageFromGallery bulunamadı.",
-      });
-      log("Native bridge missing");
+      toast({ variant: "destructive", title: "Native bridge yok" });
       return;
     }
-    log("Calling native picker");
     try {
       window.NativeImage.pickImageFromGallery();
-    } catch (e) {
-      log("Native picker call failed", { message: e?.message });
-      toast({ variant: "destructive", title: "Native picker açılamadı" });
+    } catch {
+      toast({ variant: "destructive", title: "Galeriyi açamadım" });
     }
   };
 
-  const uploadToSupabase = async () => {
-    const blob = imageBlob;
-    const meta = imageMeta;
+  // -----------------------------
+  // AI Analyze
+  // -----------------------------
+  const uploadBlobToSupabase = async (blob, meta, userId) => {
+    const mime = meta?.type || "image/jpeg";
+    const ext = guessExtFromMime(mime);
+    const fileName = `${uuidv4()}.${ext}`;
+    const filePath = `${userId}/${fileName}`;
 
-    if (!blob || !meta?.type) throw new Error("NO_IMAGE");
-
-    const ext = guessExtFromMime(meta.type);
-    const filePath = `tmp/${uuidv4()}.${ext}`;
-
-    log("Uploading", {
-      bucket: FOOD_BUCKET,
-      filePath,
-      size: blob.size,
-      type: meta.type,
-    });
-
-    // ✅ Blob upload
     const { error: uploadError } = await supabase.storage
       .from(FOOD_BUCKET)
       .upload(filePath, blob, {
-        contentType: meta.type,
+        contentType: mime,
         upsert: false,
+        cacheControl: "3600",
       });
 
     if (uploadError) throw uploadError;
 
-    const { data: publicData } = supabase.storage
-      .from(FOOD_BUCKET)
-      .getPublicUrl(filePath);
-
+    const { data: publicData } = supabase.storage.from(FOOD_BUCKET).getPublicUrl(filePath);
     const imageUrl = publicData?.publicUrl;
-    if (!imageUrl) throw new Error("NO_PUBLIC_URL");
-
-    return { imageUrl, filePath };
+    if (!imageUrl) throw new Error("PUBLIC_URL_FAIL");
+    return imageUrl;
   };
 
-  const analyze = async () => {
-    if (!imageBlob || !imageMeta?.size) return;
-    if (isUploading || isAnalyzing) return;
+  const handleAnalyze = async () => {
+    if (!aiBlob || !aiMeta || !user || isAnalyzing) return;
 
-    setIsUploading(true);
+    // Kota kontrol (analiz premium/limitli)
+    const quota = await checkAndUpdateQuota(user.id);
+    if (!quota.allowed) {
+      toast({
+        variant: "destructive",
+        title: "Limit Doldu",
+        description: quota.reason === "DAILY_LIMIT_REACHED" ? "Günlük AI kullanım hakkınız doldu." : "Aylık AI kullanım hakkınız doldu.",
+      });
+      return;
+    }
+
     setIsAnalyzing(true);
-    setResult(null);
+    setAnalysisResult(null);
 
     try {
-      const { imageUrl } = await uploadToSupabase();
-      setIsUploading(false);
+      // Upload
+      const imageUrl = await uploadBlobToSupabase(aiBlob, aiMeta, user.id);
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
+      // Session
+      const { data: sessionWrap } = await supabase.auth.getSession();
+      const session = sessionWrap?.session;
       if (!session?.access_token) throw new Error("NO_SESSION");
 
-      log("Calling function analyze-food-image", { imageUrl });
-
-      const { data, error } = await supabase.functions.invoke(
-        "analyze-food-image",
-        {
-          body: { imageUrl },
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        }
-      );
+      // Invoke function
+      const { data, error } = await supabase.functions.invoke("analyze-food-image", {
+        body: { imageUrl },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
 
       if (error) throw error;
 
-      setResult(data);
-      log("Analyze success", { keys: data ? Object.keys(data) : null });
-
-      toast({ title: "Analiz tamamlandı" });
-    } catch (e) {
-      log("Analyze failed", { message: e?.message });
-      toast({ variant: "destructive", title: "Analiz başarısız" });
+      setAnalysisResult(data);
+      await incrementAiUsage(user.id);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(err);
+      toast({ variant: "destructive", title: "Analiz Hatası", description: "Analiz yapılamadı." });
     } finally {
-      setIsUploading(false);
       setIsAnalyzing(false);
     }
   };
 
-  const pushToApp = () => {
-    if (!result) {
-      toast({ title: "Önce analiz yap" });
-      return;
-    }
-    if (typeof addMeal !== "function") {
-      toast({
-        variant: "destructive",
-        title: "addMeal bulunamadı",
-        description: "App.jsx tarafında prop geçildiğinden emin ol.",
-      });
-      return;
-    }
-    const meal = buildMealFromResult(result);
+  const handleConfirmMealFromAI = () => {
+    if (!analysisResult || !user) return;
+
+    const meal = {
+      meal_type: mealType,
+      food_name: analysisResult?.name || "Bilinmeyen",
+      calories: safeNumber(analysisResult?.calories, 0),
+      protein: safeNumber(analysisResult?.protein, 0),
+      carbs: safeNumber(analysisResult?.carbs, 0),
+      fat: safeNumber(analysisResult?.fat, 0),
+      quantity: safeNumber(analysisResult?.quantity, 1),
+      unit: analysisResult?.unit || "adet",
+      user_id: user.id,
+      date: todayYMD(),
+    };
+
     addMeal(meal);
-    toast({ title: "Öğün eklendi", description: meal.name });
-    log("Meal pushed", { id: meal.id, name: meal.name });
+
+    setAnalysisResult(null);
+    removePhoto();
+
+    toast({ title: "Öğün Eklendi", description: `${meal.food_name} başarıyla kaydedildi.` });
   };
 
-  const busy = isUploading || isAnalyzing;
-  const canAnalyze = !!imageBlob && !!imageMeta?.size && !busy;
+  // -----------------------------
+  // UI helpers
+  // -----------------------------
+  const FoodIcon = ({ category }) => {
+    const p = { className: "w-6 h-6 text-emerald-600" };
+    if (category === "kahvalti") return <Coffee {...p} />;
+    if (category === "ana_yemek") return <Drumstick {...p} />;
+    if (category === "ara_ogun") return <Apple {...p} />;
+    return <Utensils {...p} />;
+  };
+
+  const calculatedMacros = selectedFood
+    ? (() => {
+        const qty = safeNumber(quantity, 0);
+        const multiplier = getMultiplier(unit, qty, selectedFood);
+        return {
+          calories: (safeNumber(selectedFood.calories) * multiplier).toFixed(0),
+          protein: (safeNumber(selectedFood.protein) * multiplier).toFixed(1),
+          carbs: (safeNumber(selectedFood.carbs) * multiplier).toFixed(1),
+          fat: (safeNumber(selectedFood.fat) * multiplier).toFixed(1),
+        };
+      })()
+    : null;
 
   return (
-    <div className="p-4 space-y-4 max-w-md mx-auto">
-      <div className="space-y-1">
-        <div className="text-lg font-semibold">Öğün Ekle (MealTracker)</div>
-        <div className="text-sm text-muted-foreground">
-          Web’de dosya seç, Android’de native picker varsa onu kullan.
-        </div>
-      </div>
+    <div className="p-4 space-y-6">
+      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
+        <h1 className="text-2xl font-bold text-gray-800">Öğün Ekle</h1>
+        <p className="text-gray-500">Geniş veritabanından yiyecek arayın veya fotoğrafla analiz edin.</p>
+      </motion.div>
 
-      <Button
-        onClick={pickFromNative}
-        className="w-full"
-        variant={nativeAvailable ? "outline" : "secondary"}
-        disabled={!nativeAvailable}
-      >
-        <ImageIcon className="mr-2 h-4 w-4" />
-        Galeriden Foto Seç (Native)
-      </Button>
+      <Tabs defaultValue="manual" className="w-full">
+        <TabsList className="grid grid-cols-2 w-full">
+          <TabsTrigger value="manual">Manuel Arama</TabsTrigger>
+          <TabsTrigger value="ai">
+            <Zap className="h-4 w-4 mr-1" /> Yapay Zeka
+          </TabsTrigger>
+        </TabsList>
 
-      <label className="block">
-        <div className="mb-2 text-sm text-muted-foreground">
-          Web/PC için dosya seç:
-        </div>
-        <div className="flex items-center gap-2">
-          <input type="file" accept="image/*" onChange={onWebPick} />
-          <Upload className="h-4 w-4 opacity-60" />
-        </div>
-      </label>
+        {/* MANUEL TAB */}
+        <TabsContent value="manual" className="p-4 space-y-4 bg-white shadow rounded-b-lg">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+            <Input
+              placeholder="Yiyecek ara..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
+          </div>
 
-      {imageMeta && (
-        <div className="text-sm">
-          Seçilen: <b>{imageMeta.name}</b> ({imageMeta.size} bytes)
-        </div>
-      )}
+          <div className="space-y-2 max-h-[250px] overflow-y-auto">
+            <AnimatePresence>
+              {loading ? (
+                <div className="flex justify-center items-center p-4">
+                  <Loader2 className="animate-spin text-emerald-600 w-6 h-6" />
+                </div>
+              ) : (
+                searchResults.map((food) => (
+                  <motion.div
+                    key={food.id}
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer"
+                    onClick={() => {
+                      setSelectedFood(food);
+                      setQuantity(100);
+                      setUnit("gram");
+                    }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <FoodIcon category={food.category} />
+                      <div>
+                        <p className="font-semibold">{food.name_tr}</p>
+                        <p className="text-sm text-gray-500">{food.calories} kcal</p>
+                      </div>
+                    </div>
+                    <Plus className="w-5 h-5 text-emerald-600" />
+                  </motion.div>
+                ))
+              )}
+            </AnimatePresence>
+          </div>
 
-      {previewUrl && (
-        <div className="rounded border overflow-hidden">
-          <img src={previewUrl} alt="Seçilen görsel" className="w-full h-auto block" />
-        </div>
-      )}
+          {!loading && searchResults.length === 0 && searchTerm.trim().length >= 2 && (
+            <p className="text-center text-sm text-gray-500">Sonuç bulunamadı.</p>
+          )}
+        </TabsContent>
 
-      <Button
-        onClick={analyze}
-        disabled={!canAnalyze}
-        className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
-      >
-        {busy ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            {isUploading ? "Yükleniyor" : "Analiz Ediliyor"}
-          </>
-        ) : (
-          "Analiz Et"
-        )}
-      </Button>
+        {/* AI TAB */}
+        <TabsContent value="ai" className="p-4 space-y-4 bg-white shadow rounded-b-lg">
+          {isQuotaReached && !analysisResult ? (
+            <div className="text-center p-6 bg-red-50 border border-red-300 rounded-lg">
+              <Zap className="mx-auto h-8 w-8 text-red-500" />
+              <h3 className="font-semibold text-red-600 mt-2">Günlük Limit Doldu</h3>
+              <p className="text-sm text-red-700">Günlük hakkınız: {quotaLimit}</p>
+              <Button className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700">
+                Premium’a Yükselt
+              </Button>
+            </div>
+          ) : analysisResult ? (
+            <div className="space-y-4">
+              <h3 className="text-lg font-bold text-gray-800">Analiz Sonucu: {analysisResult?.name}</h3>
 
-      {result && (
-        <div className="space-y-2">
-          <div className="text-sm font-semibold">Analiz Sonucu</div>
-          <pre className="p-3 bg-gray-100 rounded text-xs overflow-auto max-h-64">
-            {safeJson(result)}
-          </pre>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="p-3 bg-gray-100 rounded-lg">
+                  Kcal: <span className="font-bold text-emerald-600">{safeNumber(analysisResult?.calories, 0)}</span>
+                </div>
+                <div className="p-3 bg-gray-100 rounded-lg">Protein: {safeNumber(analysisResult?.protein, 0)}g</div>
+                <div className="p-3 bg-gray-100 rounded-lg">Karbonhidrat: {safeNumber(analysisResult?.carbs, 0)}g</div>
+                <div className="p-3 bg-gray-100 rounded-lg">Yağ: {safeNumber(analysisResult?.fat, 0)}g</div>
+                <div className="col-span-2 p-3 bg-gray-100 rounded-lg">
+                  Miktar: {safeNumber(analysisResult?.quantity, 1)} {analysisResult?.unit || "adet"}
+                </div>
+              </div>
 
-          <Button onClick={pushToApp} className="w-full">
-            <Plus className="mr-2 h-4 w-4" />
-            Öğün Olarak Ekle
-          </Button>
-        </div>
-      )}
+              <Button onClick={handleConfirmMealFromAI} className="w-full bg-emerald-600 hover:bg-emerald-700">
+                Öğün Olarak Kaydet
+              </Button>
 
-      <details className="text-xs text-gray-500">
-        <summary>Debug Log</summary>
-        <pre className="whitespace-pre-wrap">{logs.join("\n")}</pre>
-      </details>
+              <Button variant="outline" onClick={() => setAnalysisResult(null)} className="w-full">
+                Yeni Analiz
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* Hidden input (web) */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                id="upload-ai"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+
+              {/* Native picker button (Android) */}
+              <Button
+                type="button"
+                variant={nativeAvailable ? "outline" : "secondary"}
+                disabled={!nativeAvailable}
+                onClick={pickFromNative}
+                className="w-full"
+              >
+                <ImageIcon className="mr-2 h-4 w-4" />
+                Galeriden Foto Seç (Native)
+              </Button>
+
+              {/* Web upload card */}
+              {!aiBlob && (
+                <Label
+                  htmlFor="upload-ai"
+                  className="cursor-pointer flex flex-col items-center justify-center p-8 border-2 border-emerald-300 border-dashed rounded-lg hover:bg-emerald-50"
+                >
+                  <Camera className="h-8 w-8 text-emerald-500" />
+                  <p className="mt-2 font-medium text-emerald-700">Yemek Fotoğrafı Yükle</p>
+                </Label>
+              )}
+
+              {/* Seçildiyse küçük preview + aksiyonlar */}
+              {aiBlob && (
+                <div className="p-4 border rounded-lg bg-gray-50 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-800 text-sm truncate">{aiMeta?.name}</p>
+                      <p className="text-xs text-gray-500">{aiMeta?.size ? `${aiMeta.size} bytes` : ""}</p>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <Button
+                        variant="outline"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="border-blue-500 text-blue-600 hover:bg-blue-50"
+                        type="button"
+                      >
+                        Değiştir
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={removePhoto}
+                        className="border-red-500 text-red-600 hover:bg-red-50"
+                        type="button"
+                      >
+                        Kaldır
+                      </Button>
+                    </div>
+                  </div>
+
+                  {previewUrl && (
+                    <div className="rounded-lg overflow-hidden border bg-white">
+                      <img
+                        src={previewUrl}
+                        alt="Seçilen foto"
+                        className="w-full max-h-56 object-cover"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <Button
+                onClick={handleAnalyze}
+                disabled={!aiBlob || isAnalyzing}
+                className="w-full bg-emerald-600 hover:bg-emerald-700"
+              >
+                {isAnalyzing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Analiz Ediliyor...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="mr-2 h-4 w-4" /> Yemeği Analiz Et
+                  </>
+                )}
+              </Button>
+
+              <p className="text-xs text-center text-gray-500">
+                Kalan hakkınız: {Math.max(0, quotaLimit - currentQuota)}
+              </p>
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* MANUEL MODAL */}
+      <Dialog open={!!selectedFood} onOpenChange={(v) => !v && setSelectedFood(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{selectedFood?.name_tr}</DialogTitle>
+            <DialogDescription>Miktar ve öğün türünü seç.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <Label>Miktar</Label>
+                <Input
+                  type="number"
+                  value={quantity}
+                  className="mt-1"
+                  onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                />
+              </div>
+
+              <div className="w-32">
+                <Label>Birim</Label>
+                <Select value={unit} onValueChange={setUnit}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="gram">Gram</SelectItem>
+                    <SelectItem value="adet">Adet</SelectItem>
+                    <SelectItem value="porsiyon">Porsiyon</SelectItem>
+                    <SelectItem value="bardak">Bardak</SelectItem>
+                    <SelectItem value="kasik">Kaşık</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <Select value={mealType} onValueChange={setMealType}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Kahvaltı">Kahvaltı</SelectItem>
+                <SelectItem value="Öğle Yemeği">Öğle Yemeği</SelectItem>
+                <SelectItem value="Akşam Yemeği">Akşam Yemeği</SelectItem>
+                <SelectItem value="Atıştırmalık">Atıştırmalık</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {calculatedMacros && (
+              <div className="p-3 bg-emerald-50 border rounded-lg text-sm">
+                <p className="font-semibold text-gray-800">Hesaplanan Değerler:</p>
+                <p className="font-medium">
+                  Kalori: <b>{calculatedMacros.calories} kcal</b>
+                </p>
+                <p>Protein: {calculatedMacros.protein} g</p>
+                <p>Karbonhidrat: {calculatedMacros.carbs} g</p>
+                <p>Yağ: {calculatedMacros.fat} g</p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button onClick={handleAddMealManual} className="w-full bg-emerald-600 hover:bg-emerald-700">
+              Öğün Olarak Ekle
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+
+// ======================================================================
+//                            END OF FILE
+// ======================================================================
