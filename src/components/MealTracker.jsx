@@ -727,28 +727,45 @@ export function MealTracker({ addMeal }) {
 )}
 
           {!loadingSearch && searchResults.length === 0 && searchTerm.trim().length >= 2 && (
-            <div className="space-y-2">
-              <p className="text-center text-sm text-gray-500">Sonuç bulunamadı.</p>
+  <Button
+    className="w-full bg-emerald-600 hover:bg-emerald-700"
+    onClick={async () => {
+      try {
+        const q = searchTerm.trim();
 
-              <Button
-                onClick={handleAddFromAI}
-                disabled={addingFromAI}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60"
-              >
-                {addingFromAI ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Ekleniyor...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="mr-2 h-4 w-4" />
-                    AI ile ekle (ücretsiz)
-                  </>
-                )}
-              </Button>
-            </div>
-          )}
+        // device_id yoksa sabit üret (sen daha önce kullanıyordun)
+        let device_id = localStorage.getItem("dp_device_id");
+        if (!device_id) {
+          device_id = crypto.randomUUID();
+          localStorage.setItem("dp_device_id", device_id);
+        }
+
+        // JWT verify kapalı olduğu için ANON key ile Bearer şart
+        const anon = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+        const { data, error } = await supabase.functions.invoke("ai-food", {
+          body: JSON.stringify({ query: q, device_id }),
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${anon}`,
+          },
+        });
+
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+
+        const food = data.food;
+        setSearchResults([food]); // hemen listede gözüksün
+        toast({ title: "Eklendi", description: `"${food.name}" veritabanına eklendi.` });
+      } catch (e) {
+        toast({ variant: "destructive", title: "AI ekleme hatası", description: e?.message ?? "Bilinmeyen hata" });
+      }
+    }}
+  >
+    AI ile ekle: “{searchTerm.trim()}”
+  </Button>
+)}
+
         </TabsContent>
 
         {/* AI */}
