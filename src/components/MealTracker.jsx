@@ -138,36 +138,55 @@ async function incrementAiUsage(supabaseClient, userId) {
 }
 
 // -----------------------------
-// Optional: HEIC normalize (istersen sonra ekleriz)
-// Şimdilik direkt file döndürüyoruz (stabil olsun)
+// ✅ Mobile-stable image normalize
+// - 0 byte kontrolü
+// - arrayBuffer -> Blob -> File (mobil WebView/Safari bug bypass)
 // -----------------------------
 async function normalizeImageFile(file) {
-  return file;
+  if (!file) throw new Error("NO_FILE");
+
+  // 0 byte koruması
+  if (!file.size || file.size === 0) {
+    throw new Error("EMPTY_FILE");
+  }
+
+  // Mobilde bazen File referansı “var ama bozuk” oluyor.
+  // Byte’ları okuyup temiz bir File üretmek en stabil yol.
+  const buffer = await file.arrayBuffer();
+  if (!buffer || buffer.byteLength === 0) {
+    throw new Error("EMPTY_BUFFER");
+  }
+
+  const blob = new Blob([buffer], { type: file.type || "image/jpeg" });
+
+  const safeName = file.name && file.name.trim().length ? file.name : `image_${Date.now()}.jpg`;
+
+  return new File([blob], safeName, {
+    type: blob.type,
+    lastModified: Date.now(),
+  });
 }
 
 export const MealTracker = ({ addMeal }) => {
-const { toast } = useToast();
-const { user, userData } = useAuth();
+  const { toast } = useToast();
+  const { user, userData } = useAuth();
 
-// ✅ Tabs state (kalıcı + stabil)
-const getTabFromHash = () => {
-  const h = (window.location.hash || "").replace("#", "");
-  return h === "ai" ? "ai" : "manual";
-};
+  // ✅ Tabs state (kalıcı + stabil)
+  const getTabFromHash = () => {
+    const h = (window.location.hash || "").replace("#", "");
+    return h === "ai" ? "ai" : "manual";
+  };
 
+  const [activeTab, setActiveTab] = useState(() => {
+    const h = (window.location.hash || "").replace("#", "");
+    return h === "ai" ? "ai" : "manual";
+  });
 
-const [activeTab, setActiveTab] = useState(() => {
-  const h = (window.location.hash || "").replace("#", "");
-  return h === "ai" ? "ai" : "manual";
-});
-
-
-useEffect(() => {
-  const onHash = () => setActiveTab(getTabFromHash());
-  window.addEventListener("hashchange", onHash);
-  return () => window.removeEventListener("hashchange", onHash);
-}, []);
-
+  useEffect(() => {
+    const onHash = () => setActiveTab(getTabFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   // Kullanıcı planı (UI için)
   const currentPlan = userData?.plan_tier || "free";
@@ -188,7 +207,8 @@ useEffect(() => {
   // AI FOTOĞRAF STATE
   const fileInputRef = useRef(null);
   const [aiFile, setAiFile] = useState(null);
-    // Foto seçildiyse her zaman AI tab'da kal
+
+  // Foto seçildiyse her zaman AI tab'da kal
   useEffect(() => {
     if (aiFile) {
       setActiveTab("ai");
@@ -198,40 +218,39 @@ useEffect(() => {
     }
   }, [aiFile]);
 
-    // Galeriden geri dönünce tab'ı tekrar AI'ye çek
+  // Galeriden geri dönünce tab'ı tekrar AI'ye çek
   useEffect(() => {
-  if (aiFile) {
-    setActiveTab("ai");
-    window.location.hash = "ai";
-  }
-}, [aiFile]);
-
-// =====================================================
-// GALERİDEN GERİ DÖNÜŞTE AI TAB'A KİLİT (KESİN ÇÖZÜM)
-// =====================================================
-useEffect(() => {
-  const restoreTab = () => {
     if (aiFile) {
       setActiveTab("ai");
       window.location.hash = "ai";
     }
-  };
+  }, [aiFile]);
 
-  // Galeri -> uygulamaya dönüş
-  window.addEventListener("focus", restoreTab);
+  // =====================================================
+  // GALERİDEN GERİ DÖNÜŞTE AI TAB'A KİLİT (KESİN ÇÖZÜM)
+  // =====================================================
+  useEffect(() => {
+    const restoreTab = () => {
+      if (aiFile) {
+        setActiveTab("ai");
+        window.location.hash = "ai";
+      }
+    };
 
-  // Arka plan / ön plan geçişleri
-  const onVisibilityChange = () => {
-    if (!document.hidden) restoreTab();
-  };
-  document.addEventListener("visibilitychange", onVisibilityChange);
+    // Galeri -> uygulamaya dönüş
+    window.addEventListener("focus", restoreTab);
 
-  return () => {
-    window.removeEventListener("focus", restoreTab);
-    document.removeEventListener("visibilitychange", onVisibilityChange);
-  };
-}, [aiFile]);
+    // Arka plan / ön plan geçişleri
+    const onVisibilityChange = () => {
+      if (!document.hidden) restoreTab();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
+    return () => {
+      window.removeEventListener("focus", restoreTab);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [aiFile]);
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -253,11 +272,9 @@ useEffect(() => {
             }
           })()}`;
 
-    // console
     // eslint-disable-next-line no-console
     console.log(line);
 
-    // on-screen
     setAiDebugLogs((prev) => {
       const next = [...prev, line];
       return next.length > 200 ? next.slice(next.length - 200) : next;
@@ -285,66 +302,65 @@ useEffect(() => {
   }, [aiFile]);
 
   // ✅ Native Android picker callback: window.__nativeImagePickResult(b64, mime)
-useEffect(() => {
-  window.__nativeImagePickResult = async (b64, mime) => {
-    try {
-      debugLog("Native pick result received", {
-        hasB64: !!b64,
-        mime: mime || null,
-        b64Len: b64 ? b64.length : 0,
-      });
+  useEffect(() => {
+    window.__nativeImagePickResult = async (b64, mime) => {
+      try {
+        debugLog("Native pick result received", {
+          hasB64: !!b64,
+          mime: mime || null,
+          b64Len: b64 ? b64.length : 0,
+        });
 
-      if (!b64) {
+        if (!b64) {
+          toast({
+            variant: "destructive",
+            title: "Foto seçilmedi",
+            description: "İptal edildi.",
+          });
+          return;
+        }
+
+        const safeMime = mime || "image/jpeg";
+
+        // ✅ Android WebView'da en stabil yöntem: data URL -> blob
+        const res = await fetch(`data:${safeMime};base64,${b64}`);
+        const blob = await res.blob();
+
+        const ext = (safeMime.split("/")[1] || "jpg").toLowerCase();
+        const file = new File([blob], `native_${Date.now()}.${ext}`, { type: safeMime });
+
+        debugLog("Native file constructed", { name: file.name, type: file.type, size: file.size });
+
+        if (!file.size || file.size <= 0) {
+          toast({
+            variant: "destructive",
+            title: "Foto okunamadı",
+            description: "Dosya boyutu 0 görünüyor.",
+          });
+          return;
+        }
+
+        setAiFile(file);
+        setAnalysisResult(null);
+        setActiveTab("ai");
+
+        if (fileInputRef.current) fileInputRef.current.value = "";
+
+        toast({ title: "Foto seçildi", description: "Analiz edebilirsin." });
+      } catch (e) {
+        debugLog("Native pick decode failed", { message: e?.message, name: e?.name });
         toast({
           variant: "destructive",
-          title: "Foto seçilmedi",
-          description: "İptal edildi.",
+          title: "Foto işlenemedi",
+          description: e?.message || "Bilinmeyen hata",
         });
-        return;
       }
+    };
 
-      const safeMime = mime || "image/jpeg";
-
-      // ✅ Android WebView'da en stabil yöntem: data URL -> blob
-      const res = await fetch(`data:${safeMime};base64,${b64}`);
-      const blob = await res.blob();
-
-      const ext = (safeMime.split("/")[1] || "jpg").toLowerCase();
-      const file = new File([blob], `native_${Date.now()}.${ext}`, { type: safeMime });
-
-      debugLog("Native file constructed", { name: file.name, type: file.type, size: file.size });
-
-      if (!file.size || file.size <= 0) {
-        toast({
-          variant: "destructive",
-          title: "Foto okunamadı",
-          description: "Dosya boyutu 0 görünüyor.",
-        });
-        return;
-      }
-
-      setAiFile(file);
-      setAnalysisResult(null);
-      setActiveTab("ai");
-
-      if (fileInputRef.current) fileInputRef.current.value = "";
-
-      toast({ title: "Foto seçildi", description: "Analiz edebilirsin." });
-    } catch (e) {
-      debugLog("Native pick decode failed", { message: e?.message, name: e?.name });
-      toast({
-        variant: "destructive",
-        title: "Foto işlenemedi",
-        description: e?.message || "Bilinmeyen hata",
-      });
-    }
-  };
-
-  return () => {
-    window.__nativeImagePickResult = undefined;
-  };
-}, [debugLog, toast, fileInputRef]);
-
+    return () => {
+      window.__nativeImagePickResult = undefined;
+    };
+  }, [debugLog, toast, fileInputRef]);
 
   // =====================================================
   //                     SEARCH FOODS
@@ -456,7 +472,22 @@ useEffect(() => {
   // =====================================================
   const handleFileChange = (e) => {
     if (e.target.files?.length > 0) {
-      setAiFile(e.target.files[0]);
+      const f = e.target.files[0];
+
+      debugLog("File picked (input)", { name: f?.name, type: f?.type, size: f?.size });
+
+      // ✅ Mobilde 0 byte gelirse burada yakala
+      if (!f?.size || f.size === 0) {
+        toast({
+          variant: "destructive",
+          title: "Foto okunamadı",
+          description: "Seçilen dosya boş görünüyor (0 byte). Lütfen tekrar deneyin.",
+        });
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+
+      setAiFile(f);
       setAnalysisResult(null);
       setActiveTab("ai");
     }
@@ -510,11 +541,14 @@ useEffect(() => {
       // 2) upload
       const normalizedFile = await normalizeImageFile(aiFile);
 
+      // ✅ Normalize sonrası ekstra koruma
+      if (!normalizedFile?.size || normalizedFile.size === 0) {
+        throw new Error("IMAGE_IS_EMPTY_AFTER_NORMALIZE");
+      }
+
       const safeName = normalizedFile?.name || aiFile?.name || "";
       const extFromName = safeName.includes(".") ? safeName.split(".").pop() : null;
-      const extFromType = (normalizedFile?.type || aiFile?.type || "")
-        .split("/")[1]
-        ?.trim();
+      const extFromType = (normalizedFile?.type || aiFile?.type || "").split("/")[1]?.trim();
       const ext = (extFromName || extFromType || "jpg").toLowerCase();
 
       const fileName = `${uuidv4()}.${ext}`;
@@ -664,20 +698,19 @@ useEffect(() => {
       </motion.div>
 
       <Tabs
-  value={activeTab}
-  onValueChange={(v) => {
-    setActiveTab(v);
-    window.location.hash = v; // ✅ manual / ai
-  }}
-  className="w-full"
->
-  <TabsList className="grid grid-cols-2 w-full">
-    <TabsTrigger value="manual">Manuel Arama</TabsTrigger>
-    <TabsTrigger value="ai">
-      <Zap className="h-4 w-4 mr-1" /> Yapay Zeka
-    </TabsTrigger>
-  </TabsList>
-
+        value={activeTab}
+        onValueChange={(v) => {
+          setActiveTab(v);
+          window.location.hash = v; // ✅ manual / ai
+        }}
+        className="w-full"
+      >
+        <TabsList className="grid grid-cols-2 w-full">
+          <TabsTrigger value="manual">Manuel Arama</TabsTrigger>
+          <TabsTrigger value="ai">
+            <Zap className="h-4 w-4 mr-1" /> Yapay Zeka
+          </TabsTrigger>
+        </TabsList>
 
         {/* MANUEL ARAMA TAB */}
         <TabsContent value="manual" className="p-4 space-y-4 bg-white shadow rounded-b-lg">
