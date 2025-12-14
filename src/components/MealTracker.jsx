@@ -7,7 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 
 const FOOD_BUCKET = "food-images";
 
-export default function AiFoodAnalyzer() {
+function AiFoodAnalyzer() {
   const { toast } = useToast();
 
   const [file, setFile] = useState(null);
@@ -23,17 +23,10 @@ export default function AiFoodAnalyzer() {
     setLogs((p) => [...p, line]);
   };
 
-  // -----------------------------
-  // Native callback (TEK GİRİŞ NOKTASI)
-  // -----------------------------
   useEffect(() => {
     window.__nativeImagePickResult = async (b64, mime) => {
       try {
-        log("Native callback received", {
-          hasB64: !!b64,
-          mime,
-          len: b64?.length || 0,
-        });
+        log("Native callback received", { hasB64: !!b64, mime, len: b64?.length || 0 });
 
         if (!b64) {
           toast({ title: "Foto seçilmedi" });
@@ -50,10 +43,7 @@ export default function AiFoodAnalyzer() {
         log("File constructed", { size: f.size, type: f.type });
 
         if (!f.size) {
-          toast({
-            variant: "destructive",
-            title: "Foto okunamadı",
-          });
+          toast({ variant: "destructive", title: "Foto okunamadı" });
           return;
         }
 
@@ -61,10 +51,7 @@ export default function AiFoodAnalyzer() {
         setResult(null);
       } catch (e) {
         log("Native decode error", { message: e?.message });
-        toast({
-          variant: "destructive",
-          title: "Foto işlenemedi",
-        });
+        toast({ variant: "destructive", title: "Foto işlenemedi" });
       }
     };
 
@@ -73,9 +60,6 @@ export default function AiFoodAnalyzer() {
     };
   }, [toast]);
 
-  // -----------------------------
-  // Native picker aç
-  // -----------------------------
   const pickPhoto = () => {
     if (!window?.NativeImage?.pickImageFromGallery) {
       toast({
@@ -90,9 +74,6 @@ export default function AiFoodAnalyzer() {
     window.NativeImage.pickImageFromGallery();
   };
 
-  // -----------------------------
-  // Analyze
-  // -----------------------------
   const analyze = async () => {
     if (!file || isAnalyzing) return;
 
@@ -107,37 +88,23 @@ export default function AiFoodAnalyzer() {
 
       const { error: uploadError } = await supabase.storage
         .from(FOOD_BUCKET)
-        .upload(filePath, file, {
-          contentType: file.type,
-          upsert: false,
-        });
+        .upload(filePath, file, { contentType: file.type, upsert: false });
 
       if (uploadError) throw uploadError;
 
-      const { data: publicData } = supabase.storage
-        .from(FOOD_BUCKET)
-        .getPublicUrl(filePath);
-
+      const { data: publicData } = supabase.storage.from(FOOD_BUCKET).getPublicUrl(filePath);
       const imageUrl = publicData?.publicUrl;
       if (!imageUrl) throw new Error("NO_PUBLIC_URL");
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
+      const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error("NO_SESSION");
 
       log("Calling function");
 
-      const { data, error } = await supabase.functions.invoke(
-        "analyze-food-image",
-        {
-          body: { imageUrl },
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        }
-      );
+      const { data, error } = await supabase.functions.invoke("analyze-food-image", {
+        body: { imageUrl },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
 
       if (error) throw error;
 
@@ -145,10 +112,7 @@ export default function AiFoodAnalyzer() {
       log("Analyze success", data);
     } catch (e) {
       log("Analyze failed", { message: e?.message });
-      toast({
-        variant: "destructive",
-        title: "Analiz başarısız",
-      });
+      toast({ variant: "destructive", title: "Analiz başarısız" });
     }
 
     setIsAnalyzing(false);
@@ -195,3 +159,8 @@ export default function AiFoodAnalyzer() {
     </div>
   );
 }
+
+// ✅ App.jsx bunu bekliyor:
+export const MealTracker = () => {
+  return <AiFoodAnalyzer />;
+};
