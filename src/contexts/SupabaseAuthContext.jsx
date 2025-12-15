@@ -1,6 +1,10 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
+import { Capacitor } from "@capacitor/core";
+import { Browser } from "@capacitor/browser";
+import { App } from "@capacitor/app";
+
 
 const AuthContext = createContext(undefined);
 
@@ -74,25 +78,47 @@ export const AuthProvider = ({ children }) => {
   }, [toast]);
 
   // --- YENİ EKLENEN FONKSİYON ---
-  const signInWithGoogle = useCallback(async (options = {}) => {
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo:
-        options.redirectTo ??
-        `${window.location.origin}/auth/callback`,
-    },
-  });
+ const signInWithGoogle = useCallback(async (options = {}) => {
+  try {
+    const redirectTo =
+      options.redirectTo ?? `${window.location.origin}/auth/callback`;
 
-  if (error) {
+    // ✅ Native (Android/iOS) ise: Google login'i sistem tarayıcısında aç
+    if (Capacitor.isNativePlatform()) {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo,
+          skipBrowserRedirect: true, // ✅ URL'yi biz açacağız
+        },
+      });
+
+      if (error) throw error;
+      if (!data?.url) throw new Error("No OAuth URL returned");
+
+      // App geri dönünce Supabase session otomatik yakalansın diye:
+      // (Sen zaten onAuthStateChange ile session’ı alıyorsun)
+      await Browser.open({ url: data.url });
+
+      return { error: null };
+    }
+
+    // ✅ Web ise: normal redirect akışı
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo },
+    });
+
+    if (error) throw error;
+    return { error: null };
+  } catch (error) {
     toast({
       variant: "destructive",
       title: "Google ile Giriş Başarısız",
       description: error.message || "Bir şeyler ters gitti.",
     });
+    return { error };
   }
-
-  return { error };
 }, [toast]);
 
   // --- YENİ FONKSİYON BİTİŞİ ---
