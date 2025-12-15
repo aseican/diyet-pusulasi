@@ -74,24 +74,27 @@ export const AuthProvider = ({ children }) => {
   }, [toast]);
 
   // --- YENİ EKLENEN FONKSİYON ---
-  const signInWithGoogle = useCallback(async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        // Not: Google Cloud Console'a eklediğiniz URL'e yönlendirme
-        // Zaten bir webview içindeyiz, origin'i kullanmak sorun olmamalı
-        redirectTo: window.location.origin, 
-      }
+  const signInWithGoogle = useCallback(async (options = {}) => {
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo:
+        options.redirectTo ??
+        `${window.location.origin}/auth/callback`,
+    },
+  });
+
+  if (error) {
+    toast({
+      variant: "destructive",
+      title: "Google ile Giriş Başarısız",
+      description: error.message || "Bir şeyler ters gitti.",
     });
-    if (error) {
-      toast({
-        variant: "destructive",
-        title: "Google ile Giriş Başarısız",
-        description: error.message || "Bir şeyler ters gitti.",
-      });
-    }
-    return { error };
-  }, [toast]);
+  }
+
+  return { error };
+}, [toast]);
+
   // --- YENİ FONKSİYON BİTİŞİ ---
 
 
