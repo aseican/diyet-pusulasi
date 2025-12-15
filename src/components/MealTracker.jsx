@@ -421,6 +421,10 @@ export function MealTracker({ addMeal }) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
+  const [aiItems, setAiItems] = useState([]); // [{name, calories_per_100g,...}]
+  const [aiPick, setAiPick] = useState({});   // { idx: true/false }
+  const [aiGrams, setAiGrams] = useState({}); // { idx: number }  (kaç gram yiyecek)
+
 
   const nativeAvailable = useMemo(() => !!window?.NativeImage?.pickImageFromGallery, []);
 
@@ -609,27 +613,61 @@ setAnalysisResult({
   };
 
   const handleConfirmMealFromAI = () => {
-    if (!analysisResult || !user?.id) return;
+  if (!user?.id || !aiItems?.length) return;
 
-    const meal = {
-      meal_type: mealType,
-      food_name: analysisResult?.name || "Bilinmeyen",
-      calories: safeNumber(analysisResult?.calories, 0),
-      protein: safeNumber(analysisResult?.protein, 0),
-      carbs: safeNumber(analysisResult?.carbs, 0),
-      fat: safeNumber(analysisResult?.fat, 0),
-      quantity: safeNumber(analysisResult?.quantity, 1),
-      unit: analysisResult?.unit || "adet",
-      user_id: user.id,
-      date: localYMD(),
-    };
+  let totalCalories = 0;
+  let totalProtein = 0;
+  let totalCarbs = 0;
+  let totalFat = 0;
 
-    addMeal(meal);
-    setAnalysisResult(null);
-    removePhoto();
+  aiItems.forEach((item, idx) => {
+    if (aiPick[idx] === false) return;
 
-    toast({ title: "Öğün Eklendi", description: `${meal.food_name} kaydedildi.` });
+    const grams = safeNumber(aiGrams[idx], 0);
+    if (grams <= 0) return;
+
+    const mul = grams / 100;
+
+    totalCalories += safeNumber(item.calories_per_100g) * mul;
+    totalProtein  += safeNumber(item.protein_per_100g) * mul;
+    totalCarbs    += safeNumber(item.carbs_per_100g) * mul;
+    totalFat      += safeNumber(item.fat_per_100g) * mul;
+  });
+
+  if (totalCalories <= 0) {
+    toast({
+      variant: "destructive",
+      title: "Öğün boş",
+      description: "En az bir ürün ve gram giriniz.",
+    });
+    return;
+  }
+
+  const meal = {
+    meal_type: mealType,
+    food_name: "AI Analizli Tabak",
+    calories: Math.round(totalCalories),
+    protein: Number(totalProtein.toFixed(1)),
+    carbs: Number(totalCarbs.toFixed(1)),
+    fat: Number(totalFat.toFixed(1)),
+    quantity: 1,
+    unit: "tabak",
+    user_id: user.id,
+    date: localYMD(),
   };
+
+  addMeal(meal);
+
+  // reset
+  setAnalysisResult(null);
+  setAiItems([]);
+  setAiPick({});
+  setAiGrams({});
+  removePhoto();
+
+  toast({ title: "Öğün Eklendi", description: "AI analizli tabak kaydedildi." });
+};
+
 
   const FoodIcon = ({ category }) => {
     const p = { className: "w-6 h-6 text-emerald-600" };
@@ -817,6 +855,47 @@ setAnalysisResult({
                   Miktar: {safeNumber(analysisResult?.quantity, 1)} {analysisResult?.unit || "adet"}
                 </div>
               </div>
+{/* Tabaktaki ürünler (çoklu seçim) */}
+{aiItems?.length > 0 && (
+  <div className="space-y-2 border rounded-lg p-3 bg-gray-50">
+    <p className="text-sm font-semibold text-gray-700">Tabaktaki ürünler</p>
+
+    {aiItems.map((it, idx) => {
+      const checked = aiPick[idx] !== false;
+      const g = aiGrams[idx] ?? 100;
+
+      return (
+        <div key={idx} className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => setAiPick((p) => ({ ...p, [idx]: e.target.checked }))}
+          />
+
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium truncate">{it?.name}</p>
+            <p className="text-xs text-gray-500">
+              100g: {safeNumber(it?.calories_per_100g, 0)} kcal
+            </p>
+          </div>
+
+          <Input
+            type="number"
+            className="w-24"
+            value={g}
+            onChange={(e) =>
+              setAiGrams((p) => ({
+                ...p,
+                [idx]: Math.max(0, parseInt(e.target.value || "0", 10)),
+              }))
+            }
+          />
+          <span className="text-xs text-gray-500 w-10">gr</span>
+        </div>
+      );
+    })}
+  </div>
+)}
 
               <Button onClick={handleConfirmMealFromAI} className="w-full bg-emerald-600 hover:bg-emerald-700">
                 Öğün Olarak Kaydet
