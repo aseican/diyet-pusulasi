@@ -88,6 +88,18 @@ function sanitizeAiItems(raw) {
       protein_per_100g: clamp(Number.isFinite(protein) ? protein : 0, 0, 100),
       carbs_per_100g: clamp(Number.isFinite(carbs) ? carbs : 0, 0, 100),
       fat_per_100g: clamp(Number.isFinite(fat) ? fat : 0, 0, 100),
+
+      // Optional serving / portion info (preferred defaults over hardcoded 100g)
+      portion_grams: clamp(
+        safeNumber(
+          it?.portion_grams,
+          safeNumber(it?.serving_grams, safeNumber(it?.portion_gram, safeNumber(it?.unit_gram, NaN)))
+        ),
+        0,
+        2000
+      ),
+      serving_label: it?.serving_label ?? it?.portion_label ?? it?.unit_label,
+      serving_unit: it?.serving_unit ?? it?.portion_unit ?? it?.unit,
       confidence: Number.isFinite(conf) ? clamp(conf, 0, 1) : undefined,
     });
   }
@@ -99,12 +111,22 @@ function sanitizeAiItems(raw) {
 function buildInitialAiGrams(items) {
   const grams = {};
   items.forEach((it, idx) => {
-    const suggested = it?.grams_suggested ?? it?.grams ?? it?.suggested_grams;
-    const g = Number.isFinite(Number(suggested)) ? Number(suggested) : 100;
-    grams[idx] = clamp(Math.round(g), 0, 2000);
+    const suggested =
+      it?.grams_suggested ??
+      it?.grams ??
+      it?.suggested_grams ??
+      it?.portion_grams ??
+      it?.serving_grams ??
+      it?.portion_gram ??
+      it?.unit_gram;
+
+    const n = Number(String(suggested ?? "").replace(",", "."));
+    // ✅ Hard default yok: AI bir şey söylemiyorsa kullanıcı girecek.
+    grams[idx] = Number.isFinite(n) ? clamp(n, 0, 2000) : "";
   });
   return grams;
 }
+
 
 function stripQuantity(input) {
   return (input || "")
@@ -251,10 +273,10 @@ function getMultiplier(unit, quantity, food) {
       totalGram = quantity;
       break;
     case "adet":
-      totalGram = quantity * (food.unit_gram || 100);
+      totalGram = quantity * safeNumber(food.unit_gram, 100);
       break;
     case "porsiyon":
-      totalGram = quantity * (food.portion_gram || 200);
+      totalGram = quantity * safeNumber(food.portion_gram, 200);
       break;
     case "bardak":
       totalGram = quantity * 200;
@@ -388,8 +410,8 @@ export function MealTracker({ addMeal }) {
         protein: safeNumber(f.protein, 0),
         carbs: safeNumber(f.carbs, 0),
         fat: safeNumber(f.fat, 0),
-        unit_gram: 100,
-        portion_gram: 200,
+        unit_gram: safeNumber(f.unit_gram ?? f.piece_grams ?? f.package_grams ?? f.serving_grams ?? 100, 100),
+        portion_gram: safeNumber(f.portion_gram ?? f.portion_grams ?? f.serving_grams ?? 200, 200),
         category: "ana_yemek",
       };
 
@@ -453,7 +475,7 @@ export function MealTracker({ addMeal }) {
     if (!selectedFood) return;
 
     const qty = safeNumber(quantity, 0);
-    if (!qty || qty <= 0) {
+    if (!Number.isFinite(qty) || qty <= 0) {
       toast({ variant: "destructive", title: "Eksik Bilgi", description: "Lütfen miktarı giriniz." });
       return;
     }
@@ -702,7 +724,12 @@ export function MealTracker({ addMeal }) {
   aiItems.forEach((item, idx) => {
     if (aiPick[idx] === false) return;
 
-    const grams = safeNumber(aiGrams[idx], 0);
+    const grams = (() => {
+      const raw = aiGrams[idx];
+      if (raw === "" || raw == null) return 0;
+      const n = Number(String(raw).replace(",", "."));
+      return Number.isFinite(n) ? n : 0;
+    })();
     if (grams <= 0) return;
 
     const mul = grams / 100;
@@ -941,7 +968,7 @@ export function MealTracker({ addMeal }) {
 
     {aiItems.map((it, idx) => {
       const checked = aiPick[idx] !== false;
-      const g = aiGrams[idx] ?? 100;
+      const g = aiGrams[idx] ?? "";
 
       return (
         <div key={idx} className="flex items-center gap-2">
@@ -960,12 +987,19 @@ export function MealTracker({ addMeal }) {
 
           <Input
             type="number"
+            step="0.1"
+            inputMode="decimal"
             className="w-24"
             value={g}
             onChange={(e) =>
               setAiGrams((p) => ({
                 ...p,
-                [idx]: Math.max(0, parseInt(e.target.value || "0", 10)),
+                [idx]: (() => {
+                    const raw = e.target.value;
+                    if (raw === "") return "";
+                    const n = Number(String(raw).replace(",", "."));
+                    return Number.isFinite(n) ? clamp(n, 0, 2000) : (p[idx] ?? "");
+                  })(),
               }))
             }
           />
@@ -1087,7 +1121,11 @@ export function MealTracker({ addMeal }) {
                   type="number"
                   value={quantity}
                   className="mt-1"
-                  onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const n = Number(String(raw).replace(",", "."));
+                    setQuantity(Number.isFinite(n) ? Math.max(0, n) : 0);
+                  }}
                 />
               </div>
 
