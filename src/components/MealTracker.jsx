@@ -37,6 +37,75 @@ function safeNumber(x, fallback = 0) {
   const n = Number(x);
   return Number.isFinite(n) ? n : fallback;
 }
+
+
+function clamp(n, min, max) {
+  return Math.min(max, Math.max(min, n));
+}
+
+/**
+ * AI item sanitize (production guard):
+ * - name boşsa at
+ * - sayı olmayan/negatif/absürt değerleri düzelt
+ * - confidence varsa çok düşükleri at
+ * - maksimum item sayısını sınırla
+ *
+ * Edge Function farklı field isimleri döndürebilir:
+ * calories_per_100g | kcal_100g | calories_100g vb. hepsini okur.
+ */
+function sanitizeAiItems(raw) {
+  const arr = Array.isArray(raw) ? raw : [];
+  const out = [];
+
+  for (const it of arr) {
+    const name = String(it?.name ?? it?.food_name ?? "").trim();
+    if (!name) continue;
+
+    const conf = it?.confidence != null ? safeNumber(it.confidence, NaN) : NaN;
+    if (Number.isFinite(conf) && conf < 0.35) continue;
+
+    const calories =
+      safeNumber(it?.calories_per_100g, NaN) ??
+      NaN;
+
+    const kcal =
+      Number.isFinite(calories)
+        ? calories
+        : safeNumber(it?.kcal_100g, Number.isFinite(it?.calories_100g) ? it.calories_100g : NaN);
+
+    const protein = safeNumber(it?.protein_per_100g, Number.isFinite(it?.protein_100g) ? it.protein_100g : NaN);
+    const carbs = safeNumber(it?.carbs_per_100g, Number.isFinite(it?.carbs_100g) ? it.carbs_100g : NaN);
+    const fat = safeNumber(it?.fat_per_100g, Number.isFinite(it?.fat_100g) ? it.fat_100g : NaN);
+
+    const hasAny =
+      Number.isFinite(kcal) || Number.isFinite(protein) || Number.isFinite(carbs) || Number.isFinite(fat);
+    if (!hasAny) continue;
+
+    out.push({
+      ...it,
+      name,
+      calories_per_100g: clamp(Number.isFinite(kcal) ? kcal : 0, 0, 900),
+      protein_per_100g: clamp(Number.isFinite(protein) ? protein : 0, 0, 100),
+      carbs_per_100g: clamp(Number.isFinite(carbs) ? carbs : 0, 0, 100),
+      fat_per_100g: clamp(Number.isFinite(fat) ? fat : 0, 0, 100),
+      confidence: Number.isFinite(conf) ? clamp(conf, 0, 1) : undefined,
+    });
+  }
+
+  // UI'yı şişirmemek için hard cap
+  return out.slice(0, 12);
+}
+
+function buildInitialAiGrams(items) {
+  const grams = {};
+  items.forEach((it, idx) => {
+    const suggested = it?.grams_suggested ?? it?.grams ?? it?.suggested_grams;
+    const g = Number.isFinite(Number(suggested)) ? Number(suggested) : 100;
+    grams[idx] = clamp(Math.round(g), 0, 2000);
+  });
+  return grams;
+}
+
 function stripQuantity(input) {
   return (input || "")
     .toLowerCase()
@@ -495,6 +564,9 @@ export function MealTracker({ addMeal }) {
     setAiBlob(null);
     setAiMeta(null);
     setAnalysisResult(null);
+    setAiItems([]);
+    setAiPick({});
+    setAiGrams({});
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -585,21 +657,28 @@ export function MealTracker({ addMeal }) {
       });
       if (error) throw error;
 
-     const firstItem = data?.items?.[0];
+           const items = sanitizeAiItems(data?.items);
 
-if (!firstItem) {
-  throw new Error("AI item bulunamadı");
-}
+      if (!items.length) {
+        throw new Error("AI item bulunamadı");
+      }
 
-setAnalysisResult({
-  name: firstItem.name,
-  calories: firstItem.calories_per_100g,
-  protein: firstItem.protein_per_100g,
-  carbs: firstItem.carbs_per_100g,
-  fat: firstItem.fat_per_100g,
-  quantity: 100,
-  unit: "gram",
-});
+      // Çoklu ürün: UI listesi için set et
+      setAiItems(items);
+      setAiPick({}); // default: hepsi seçili (UI: aiPick[idx] !== false)
+      setAiGrams(buildInitialAiGrams(items));
+
+      // Üstteki "Analiz Sonucu" kartı için ilk item'ı göster (UI aynı kalsın)
+      const firstItem = items[0];
+      setAnalysisResult({
+        name: firstItem.name,
+        calories: firstItem.calories_per_100g,
+        protein: firstItem.protein_per_100g,
+        carbs: firstItem.carbs_per_100g,
+        fat: firstItem.fat_per_100g,
+        quantity: 100,
+        unit: "gram",
+      });
 
 
       await incrementAiUsage(user.id);
@@ -901,7 +980,16 @@ setAnalysisResult({
                 Öğün Olarak Kaydet
               </Button>
 
-              <Button variant="outline" onClick={() => setAnalysisResult(null)} className="w-full">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setAnalysisResult(null);
+                  setAiItems([]);
+                  setAiPick({});
+                  setAiGrams({});
+                }}
+                className="w-full"
+              >
                 Yeni Analiz
               </Button>
             </div>
