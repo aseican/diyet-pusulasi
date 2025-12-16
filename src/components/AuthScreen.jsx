@@ -53,10 +53,11 @@ const AuthScreen = () => {
         <div className="text-center mb-8">
           <div className="inline-block p-4 bg-white rounded-full shadow-md mb-4">
             <img
-              src="https://i.hizliresim.com/psoyqy3.png"
-              alt="Diyet Pusulası Logo"
-              className="w-14 h-14"
-            />
+  src="/logo.png"
+  alt="Diyet Pusulası Logo"
+  className="w-14 h-14"
+/>
+
           </div>
           <h1 className="text-3xl font-bold text-gray-800">Diyet Pusulası</h1>
           <p className="text-gray-600 mt-2">Sağlıklı yaşama adım atın 💪</p>

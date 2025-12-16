@@ -100,7 +100,7 @@ export const AuthProvider = ({ children }) => {
         toast({
           variant: "destructive",
           title: "Giriş Başarısız",
-          description: error.message || "E-posta veya şifre hatalı.",
+          description: "E-posta veya şifre yanlış.",
         });
       }
       return { error };
