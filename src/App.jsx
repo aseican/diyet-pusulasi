@@ -5,7 +5,7 @@ import { supabase } from "@/lib/customSupabaseClient";
 import { useToast } from "@/components/ui/use-toast";
 import { calculateCalorieTarget } from "@/lib/calculator";
 import { handlePurchase } from "@/lib/BillingIntegration";
-
+import { useEffect } from "react";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
 import { Dashboard } from "@/components/Dashboard";
@@ -15,6 +15,10 @@ import Profile from "@/components/Profile";
 import Onboarding from "@/components/Onboarding";
 import AuthScreen from "@/components/AuthScreen";
 import { PremiumUyelik } from "@/components/PremiumUyelik";
+import { admobInit } from "@/lib/admob";
+import { showAdEvery5Meals } from "@/lib/admob";
+
+
 
 /**
  * ✅ Native image callback - GLOBAL BUFFER
@@ -41,6 +45,11 @@ function localYMD(d = new Date()) {
 export function App() {
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
+
+  // ✅ AdMob init (native cihazda 1 kere)
+  useEffect(() => {
+    admobInit();
+  }, []);
 
   // ✅ activeTab'i persist et: picker’dan dönünce resetlenmesin
   const [activeTab, setActiveTab] = React.useState(() => {
@@ -208,8 +217,9 @@ export function App() {
         description: "Öğün eklenirken bir sorun oluştu.",
       });
     } else {
-      fetchMeals();
-    }
+  fetchMeals();
+  await showAdEvery5Meals();
+}
   };
 
   const deleteMeal = async (mealId) => {
