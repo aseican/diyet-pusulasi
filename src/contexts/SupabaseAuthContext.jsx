@@ -95,17 +95,10 @@ export const AuthProvider = ({ children }) => {
 
   const signIn = useCallback(async (email, password) => {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
-
-  if (error) {
-    toast({
-      variant: "destructive",
-      title: "Giriş başarısız",
-      description: "E-posta veya şifre yanlış.",
-    });
-  }
-
+  // burada toast YOK -> UI metnini AuthScreen kontrol edecek
   return { error };
-}, [toast]);
+}, []);
+
 
 
   const signOut = useCallback(async () => {

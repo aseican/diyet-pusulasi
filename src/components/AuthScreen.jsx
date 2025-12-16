@@ -34,13 +34,14 @@ const AuthScreen = () => {
         }
       } else {
         const { error } = await signIn(email, password);
-        if (error) {
-          toast({
-            title: "Giriş başarısız",
-            description: error.message || "E-posta veya şifre yanlış.",
-            variant: "destructive",
-          });
-        }
+if (error) {
+  toast({
+    title: "Giriş başarısız",
+    description: "E-posta veya şifre yanlış.",
+    variant: "destructive",
+  });
+}
+
       }
     } finally {
       setLoading(false);
