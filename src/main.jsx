@@ -1,15 +1,26 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { App } from '@/App'; // <-- SON VE KESİN DÜZELTME: { App } eklendi
+import { App } from '@/App';
 import './index.css';
 import { AuthProvider } from './contexts/SupabaseAuthContext';
-import { Toaster } from './components/ui/toaster'; // Toast bildirimleri için gerekli
+import { Toaster } from './components/ui/toaster';
+
+// iOS klavye aç/kapa sonrası "vh takılı kalma" fix (deploy ile gelir)
+const setAppVh = () => {
+  const vv = window.visualViewport;
+  const h = (vv?.height ?? window.innerHeight) * 0.01;
+  document.documentElement.style.setProperty('--app-vh', `${h}px`);
+};
+
+setAppVh();
+window.visualViewport?.addEventListener('resize', setAppVh);
+window.addEventListener('orientationchange', setAppVh);
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <AuthProvider>
       <App />
-      <Toaster /> {/* Bildirimleri göstermek için ekledik */}
+      <Toaster />
     </AuthProvider>
   </React.StrictMode>
 );
