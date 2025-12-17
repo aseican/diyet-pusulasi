@@ -3,6 +3,7 @@
 <plist version="1.0">
 <dict>
 
+	<!-- Capacitor (bunu silme) -->
 	<key>CAPACITOR_DEBUG</key>
 	<string>$(CAPACITOR_DEBUG)</string>
 
@@ -65,16 +66,32 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 
-	<!-- ✅ GOOGLE OAUTH DEEP LINK -->
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>diyetpusulasi</string>
-			</array>
-		</dict>
-	</array>
+	<!-- AdMob iOS App ID (ZORUNLU) -->
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-3033052396800988~3880310266</string>
+
+	<!-- iOS 14+ ATT -->
+	<key>NSUserTrackingUsageDescription</key>
+	<string>Reklamları kişiselleştirmek ve uygulamayı geliştirmek için izin istiyoruz.</string>
+
+	<!-- Ağ erişimi (şimdilik serbest; sonra sıkılaştırırız) -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+
+	<!-- Kamera -->
+	<key>NSCameraUsageDescription</key>
+	<string>Yemek fotoğrafı çekebilmek için kamera izni gereklidir.</string>
+
+	<!-- Galeri (okuma) -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Yemek fotoğraflarını seçebilmek için galeri izni gereklidir.</string>
+
+	<!-- Galeri (ekleme/kaydetme ihtimali için) -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Fotoğrafları kaydedebilmek için izin gereklidir.</string>
 
 </dict>
 </plist>

@@ -1,0 +1,13 @@
+{
+  "appStoreConnectAccount": "emreecanseverr@icloud.com",
+  "appStoreConnectAppPassword": "vlvd-nnyk-hvhy-gkgd",
+
+  "release": "release",
+  "iosPackageType": "app-store",
+
+  "iosDistP12": "certificates/ios_distribution.p12",
+  "iosDistP12Password": "DiyetPusulasi2025",
+  "iosDistribution": "certificates/DiyetPusulasi_AppStore.mobileprovision",
+
+  "verbose": true
+}
