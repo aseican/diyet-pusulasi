@@ -5,24 +5,27 @@ import './index.css';
 import { AuthProvider } from './contexts/SupabaseAuthContext';
 import { Toaster } from './components/ui/toaster';
 import { Capacitor } from '@capacitor/core';
-import { Keyboard } from '@capacitor/keyboard';
 
-// iOS klavye aç/kapa sonrası "vh takılı kalma" fix
+// vh hesaplayıcı (web + native ortak)
 const setAppVh = () => {
   const vv = window.visualViewport;
   const h = (vv?.height ?? window.innerHeight) * 0.01;
   document.documentElement.style.setProperty('--app-vh', `${h}px`);
 };
 
-if (Capacitor.getPlatform() === 'ios') {
-  Keyboard.addListener('keyboardDidHide', () => {
-    requestAnimationFrame(() => {
-      setAppVh();
-      window.dispatchEvent(new Event('resize'));
+// sadece iOS native ortamda Keyboard plugin yükle
+if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios') {
+  import('@capacitor/keyboard').then(({ Keyboard }) => {
+    Keyboard.addListener('keyboardDidHide', () => {
+      requestAnimationFrame(() => {
+        setAppVh();
+        window.dispatchEvent(new Event('resize'));
+      });
     });
   });
 }
 
+// web + native ortak
 setAppVh();
 window.visualViewport?.addEventListener('resize', setAppVh);
 window.addEventListener('orientationchange', setAppVh);
